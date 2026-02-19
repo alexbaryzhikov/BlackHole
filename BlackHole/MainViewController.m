@@ -1,14 +1,16 @@
 #import "MainViewController.h"
 #import "Config.h"
-#import "RenderingView.h"
+#import "RenderView.h"
+#import "Renderer/Renderer.h"
 #import <MetalKit/MetalKit.h>
 
 @implementation MainViewController {
-    RenderingView* renderingView;
+    RenderView* renderView;
+    Renderer* renderer;
 }
 
 - (void)loadView {
-    self.view = [[RenderingView alloc] initWithFrame:NSMakeRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)];
+    self.view = [[RenderView alloc] initWithFrame:NSMakeRect(0, 0, VIEWPORT_WIDTH, VIEWPORT_HEIGHT)];
 }
 
 - (void)viewDidLoad {
@@ -21,12 +23,10 @@
         return;
     }
 
-    renderingView = (RenderingView*)self.view;
-    renderingView.device = device;
-}
-
-- (void)setRepresentedObject:(id)representedObject {
-    [super setRepresentedObject:representedObject];
+    renderView = (RenderView*)self.view;
+    renderView.device = device;
+    renderer = [[Renderer alloc] initWithMetalKitView:renderView];
+    renderView.delegate = renderer;
 }
 
 @end

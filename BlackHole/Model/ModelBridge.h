@@ -1,5 +1,5 @@
+#import "ShaderTypesShared.h"
 #import <AppKit/AppKit.h>
-#import <Foundation/Foundation.h>
 
 @interface ModelBridge : NSObject
 
@@ -14,5 +14,9 @@
 + (void)rightMouseUp;
 + (void)mouseMoved:(CGVector)offset;
 + (void)mouseWheel:(CGVector)offset;
+
+#pragma mark - Uniforms
+
++ (void)copyCamera:(Camera*)dst;
 
 @end

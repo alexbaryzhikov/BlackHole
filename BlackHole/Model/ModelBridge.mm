@@ -31,4 +31,9 @@
 + (void)mouseWheel:(CGVector)offset {
 }
 
+#pragma mark - Uniforms
+
++ (void)copyCamera:(Camera*)dst {
+}
+
 @end

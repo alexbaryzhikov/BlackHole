@@ -1,8 +1,10 @@
-#ifndef Config_h
-#define Config_h
-
 // Display
-#define VIEWPORT_WIDTH      1600
-#define VIEWPORT_HEIGHT      900
+#define VIEWPORT_WIDTH              1600
+#define VIEWPORT_HEIGHT             900
 
-#endif /* Config_h */
+// Camera
+#define CAMERA_FOV                  1.04719758f
+
+// Mouse
+#define MOUSE_SENSITIVITY           1.0f
+

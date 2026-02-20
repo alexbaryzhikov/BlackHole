@@ -1,9 +1,6 @@
-#ifndef ShaderTypesShared_h
-#define ShaderTypesShared_h
-
 #ifndef __METAL_VERSION__
 
-#import <simd/simd.h>
+#include <simd/simd.h>
 typedef simd_float4 float4;
 
 #endif /* __METAL_VERSION__ */
@@ -28,5 +25,3 @@ typedef struct {
     float yaw;
     float pitch;
 } Camera;
-
-#endif /* ShaderTypesShared_h */

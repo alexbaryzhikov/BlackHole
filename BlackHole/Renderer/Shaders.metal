@@ -19,16 +19,16 @@ float4x4 makeRotation(float yaw, float pitch) {
 
 float4 getRayNormal(constant Camera& camera, uint2 pixel) {
     const float4x4 cameraRotation = makeRotation(camera.yaw, camera.pitch);
-    const float projectionDistance = (VIEWPORT_WIDTH / 2.0f) / tan(CAMERA_FOV / 2.0f);
+    const float projectionDistance = (VIEWPORT_WIDTH / 2.0f) / tan(CAMERA_HORIZONTAL_FOV / 2.0f);
     float u = (pixel.x + 0.5f) - VIEWPORT_WIDTH / 2.0f;
     float v = (pixel.y + 0.5f) - VIEWPORT_HEIGHT / 2.0f;
-    float4 direction = {projectionDistance, u, -v, 0.0f};
+    float4 direction = {projectionDistance, -u, -v, 0.0f};
     return normalize(cameraRotation * direction);
 }
 
 float2 getSkyboxCoord(float4 normal) {
-    float2 uv = float2(atan2(normal.y, normal.x), asin(normal.z)) * anglesToUV;
-    uv.x += 0.5f;
+    float2 uv = float2(atan2(normal.y, normal.x), asin(clamp(normal.z, -1.0f, 1.0f))) * anglesToUV;
+    uv.x = 0.5f - uv.x;
     uv.y = 0.5f - uv.y;
     return uv;
 }
@@ -40,7 +40,7 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
         return;
     }
-    constexpr sampler textureSampler(coord::normalized, address::repeat, filter::bicubic);
+    constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
     texture2d<float, access::sample> skyboxTexture = textures[TextureHeapIndexSkybox];
     float4 rayNormal = getRayNormal(camera, gid);
     float2 readCoord = getSkyboxCoord(rayNormal);

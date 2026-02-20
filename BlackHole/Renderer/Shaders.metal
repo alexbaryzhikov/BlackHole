@@ -26,7 +26,7 @@ float4 getRayNormal(constant Camera& camera, uint2 pixel) {
     return normalize(cameraRotation * direction);
 }
 
-float2 getEquirectangularUV(float4 normal) {
+float2 getSkyboxCoord(float4 normal) {
     float2 uv = float2(atan2(normal.y, normal.x), asin(normal.z)) * anglesToUV;
     uv.x += 0.5f;
     uv.y = 0.5f - uv.y;
@@ -40,8 +40,10 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
         return;
     }
-    float4 rayDirection = getRayNormal(camera, gid);
-    float2 uv = getEquirectangularUV(rayDirection);
-    float4 outColor = {uv.x, 0, uv.y, 1};
+    constexpr sampler textureSampler(coord::normalized, address::repeat, filter::bicubic);
+    texture2d<float, access::sample> skyboxTexture = textures[TextureHeapIndexSkybox];
+    float4 rayNormal = getRayNormal(camera, gid);
+    float2 readCoord = getSkyboxCoord(rayNormal);
+    float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
     outputTexture.write(outColor, gid);
 }

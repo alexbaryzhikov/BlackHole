@@ -7,9 +7,7 @@
     id<MTLDevice> device;
     id<MTLCommandQueue> commandQueue;
     id<MTLComputePipelineState> computePipelineState;
-
     id<MTLTexture> textures[TEXTURE_HEAP_SIZE];
-
     id<MTLBuffer> cameraBuffer;
 }
 
@@ -29,9 +27,13 @@
     view.framebufferOnly = NO;
     view.autoResizeDrawable = NO;
     view.drawableSize = CGSizeMake(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
-    view.colorPixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+    view.colorPixelFormat = MTLPixelFormatRGBA16Float;
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedDisplayP3);
+    view.colorspace = colorSpace;
+    CGColorSpaceRelease(colorSpace);
     view.layer.magnificationFilter = kCAFilterNearest;
     view.layer.contentsGravity = kCAGravityResizeAspect;
+    view.layer.preferredDynamicRange = CADynamicRangeHigh;
 }
 
 - (void)setupMetalPipeline {
@@ -57,15 +59,16 @@
         MTKTextureLoaderOptionTextureUsage : @(MTLTextureUsageShaderRead),
         MTKTextureLoaderOptionTextureStorageMode : @(MTLStorageModePrivate),
     };
-    textures[TextureHeapIndexSkybox] = [self loadTexture:@"milky_way" loader:loader options:options];
+    textures[TextureHeapIndexSkybox] = [self loadTexture:@"nebula" extension:@"exr" loader:loader options:options];
 }
 
 - (nullable id<MTLTexture>)loadTexture:(nonnull NSString*)name
+                             extension:(nonnull NSString*)extension
                                 loader:(MTKTextureLoader*)loader
                                options:(NSDictionary<MTKTextureLoaderOption, id>*)options {
-    NSURL* url = [NSBundle.mainBundle URLForResource:name withExtension:@"png"];
+    NSURL* url = [NSBundle.mainBundle URLForResource:name withExtension:extension];
     if (!url) {
-        NSLog(@"Could not find file '%@.png' in main bundle", name);
+        NSLog(@"Could not find file '%@.%@' in main bundle", name, extension);
         return nil;
     }
     NSError* error = nil;
@@ -73,7 +76,7 @@
                                                          options:options
                                                            error:&error];
     if (!texture || error) {
-        NSLog(@"Error loading texture '%@.png': %@", name, error);
+        NSLog(@"Error loading texture '%@.%@': %@", name, extension, error);
         return nil;
     }
     return texture;

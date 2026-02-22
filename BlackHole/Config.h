@@ -7,4 +7,3 @@
 
 // Mouse
 #define MOUSE_SENSITIVITY           1.0f
-

@@ -6,6 +6,12 @@ using namespace metal;
 
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
 
+constant float3x3 sRGBToP3 = {
+    {0.82246, 0.03319, 0.01708}, // Column 0 (Red mapping)
+    {0.17754, 0.96681, 0.07240}, // Column 1 (Green mapping)
+    {0.00000, 0.00000, 0.91052}  // Column 2 (Blue mapping)
+};
+
 float4x4 makeRotation(float yaw, float pitch) {
     float cy = cos(yaw);
     float sy = sin(yaw);
@@ -50,5 +56,6 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
+    outColor.rgb = sRGBToP3 * outColor.rgb;
     outputTexture.write(outColor, gid);
 }

@@ -39,10 +39,6 @@ float2 getSkyboxCoord(float4 normal) {
     return uv;
 }
 
-float3 extendedReinhard(float3 color, float max_edr) {
-    return color * (max_edr / (max_edr + color));
-}
-
 kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],
                    array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
                    constant Camera& camera [[buffer(BufferIndexCamera)]],

@@ -58,35 +58,6 @@
     textures[TextureHeapIndexSkybox] = [loader loadEXR:url];
 }
 
-- (void)loadTextures {
-    MTKTextureLoader* loader = [[MTKTextureLoader alloc] initWithDevice:device];
-    NSDictionary<MTKTextureLoaderOption, id>* options = @{
-        MTKTextureLoaderOptionTextureUsage : @(MTLTextureUsageShaderRead),
-        MTKTextureLoaderOptionTextureStorageMode : @(MTLStorageModePrivate),
-    };
-    textures[TextureHeapIndexSkybox] = [self loadTexture:@"nebula" extension:@"exr" loader:loader options:options];
-}
-
-- (nullable id<MTLTexture>)loadTexture:(nonnull NSString*)name
-                             extension:(nonnull NSString*)extension
-                                loader:(MTKTextureLoader*)loader
-                               options:(NSDictionary<MTKTextureLoaderOption, id>*)options {
-    NSURL* url = [NSBundle.mainBundle URLForResource:name withExtension:extension];
-    if (!url) {
-        NSLog(@"Could not find file '%@.%@' in main bundle", name, extension);
-        return nil;
-    }
-    NSError* error = nil;
-    id<MTLTexture> texture = [loader newTextureWithContentsOfURL:url
-                                                         options:options
-                                                           error:&error];
-    if (!texture || error) {
-        NSLog(@"Error loading texture '%@.%@': %@", name, extension, error);
-        return nil;
-    }
-    return texture;
-}
-
 - (void)drawInMTKView:(MTKView*)view {
     [self updateUniforms];
     float edrHeadroom = [self getEDRHeadroom];

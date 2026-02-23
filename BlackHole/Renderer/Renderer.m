@@ -2,8 +2,10 @@
 #import "Config.h"
 #import "ModelBridge.h"
 #import "ShaderTypesShared.h"
+#import "TextureLoader.h"
 
 @implementation Renderer {
+    __weak MTKView* mtkView;
     id<MTLDevice> device;
     id<MTLCommandQueue> commandQueue;
     id<MTLComputePipelineState> computePipelineState;
@@ -14,25 +16,22 @@
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView*)view {
     self = [super init];
     if (self) {
+        mtkView = view;
         device = view.device;
         [self setupView:view];
         [self setupMetalPipeline];
         [self createBuffers];
-        [self loadTextures];
+        [self loadSkybox];
     }
     return self;
 }
 
 - (void)setupView:(nonnull MTKView*)view {
     view.framebufferOnly = NO;
-    view.autoResizeDrawable = NO;
-    view.drawableSize = CGSizeMake(VIEWPORT_WIDTH, VIEWPORT_HEIGHT);
     view.colorPixelFormat = MTLPixelFormatRGBA16Float;
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedDisplayP3);
+    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
     view.colorspace = colorSpace;
     CGColorSpaceRelease(colorSpace);
-    view.layer.magnificationFilter = kCAFilterNearest;
-    view.layer.contentsGravity = kCAGravityResizeAspect;
     view.layer.preferredDynamicRange = CADynamicRangeHigh;
 }
 
@@ -51,6 +50,12 @@
 
 - (void)createBuffers {
     cameraBuffer = [device newBufferWithLength:sizeof(Camera) options:MTLResourceStorageModeShared];
+}
+
+- (void)loadSkybox {
+    TextureLoader* loader = [[TextureLoader alloc] initWithDevice:device];
+    NSURL* url = [NSBundle.mainBundle URLForResource:@"nebula" withExtension:@"exr"];
+    textures[TextureHeapIndexSkybox] = [loader loadEXR:url];
 }
 
 - (void)loadTextures {
@@ -84,14 +89,13 @@
 
 - (void)drawInMTKView:(MTKView*)view {
     [self updateUniforms];
-
-    id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
-
+    float edrHeadroom = [self getEDRHeadroom];
     id<CAMetalDrawable> drawable = view.currentDrawable;
     if (!drawable) {
         return;
     }
 
+    id<MTLCommandBuffer> commandBuffer = [commandQueue commandBuffer];
     id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
     [commandEncoder setComputePipelineState:computePipelineState];
     [commandEncoder setTexture:drawable.texture atIndex:TextureIndexOutput];
@@ -99,6 +103,7 @@
         [commandEncoder setTextures:textures withRange:NSMakeRange(TextureIndexHeap, TEXTURE_HEAP_SIZE)];
     }
     [commandEncoder setBuffer:cameraBuffer offset:0 atIndex:BufferIndexCamera];
+    [commandEncoder setBytes:&edrHeadroom length:sizeof(float) atIndex:BufferIndexEDRHeadroom];
 
     NSUInteger width = computePipelineState.threadExecutionWidth;
     NSUInteger height = computePipelineState.maxTotalThreadsPerThreadgroup / width;
@@ -113,6 +118,15 @@
 
 - (void)updateUniforms {
     [ModelBridge copyCamera:cameraBuffer.contents];
+}
+
+- (float)getEDRHeadroom {
+    float headroom = 1.0f;
+    NSScreen* screen = mtkView.window.screen;
+    if (screen) {
+        headroom = screen.maximumPotentialExtendedDynamicRangeColorComponentValue;
+    }
+    return MAX(1.0f, headroom);
 }
 
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {

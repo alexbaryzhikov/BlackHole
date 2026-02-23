@@ -1,7 +1,6 @@
 #import "Camera.hpp"
 #import "Config.h"
 #include <numbers>
-#include <cstdio>
 
 namespace BH::Camera {
 
@@ -31,7 +30,6 @@ float clampAngle(float angle, float low, float high) {
 void mouseDidMove(float dx, float dy) {
     yaw = normalizeAngle(yaw - dx * MOUSE_SENSITIVITY / 1024.0f);
     pitch = clampAngle(pitch - dy * MOUSE_SENSITIVITY / 1024.0f, -pi / 2.0f, pi / 2.0f);
-    printf("yaw %f pitch %f\n", yaw, pitch);
 }
 
 } // namespace BH::Camera

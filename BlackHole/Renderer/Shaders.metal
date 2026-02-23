@@ -17,11 +17,11 @@ float4x4 makeRotation(float yaw, float pitch) {
                     float4(0.0f, 0.0f, 0.0f, 1.0f));
 }
 
-float4 getRayNormal(constant Camera& camera, uint2 pixel) {
+float4 getRayNormal(constant Camera& camera, uint2 viewportSize, uint2 pixel) {
     const float4x4 cameraRotation = makeRotation(camera.yaw, camera.pitch);
-    const float projectionDistance = (VIEWPORT_WIDTH / 2.0f) / tan(CAMERA_HORIZONTAL_FOV / 2.0f);
-    float u = (pixel.x + 0.5f) - VIEWPORT_WIDTH / 2.0f;
-    float v = (pixel.y + 0.5f) - VIEWPORT_HEIGHT / 2.0f;
+    const float projectionDistance = (viewportSize.x / 2.0f) / tan(CAMERA_HORIZONTAL_FOV / 2.0f);
+    float u = (pixel.x + 0.5f) - viewportSize.x / 2.0f;
+    float v = (pixel.y + 0.5f) - viewportSize.y / 2.0f;
     float4 direction = {projectionDistance, -u, -v, 0.0f};
     return normalize(cameraRotation * direction);
 }
@@ -33,16 +33,21 @@ float2 getSkyboxCoord(float4 normal) {
     return uv;
 }
 
+float3 extendedReinhard(float3 color, float max_edr) {
+    return color * (max_edr / (max_edr + color));
+}
+
 kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],
                    array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
                    constant Camera& camera [[buffer(BufferIndexCamera)]],
+                   constant float& edrHeadroom [[buffer(BufferIndexEDRHeadroom)]],
                    uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
         return;
     }
     constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
     texture2d<float, access::sample> skyboxTexture = textures[TextureHeapIndexSkybox];
-    float4 rayNormal = getRayNormal(camera, gid);
+    float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
     outputTexture.write(outColor, gid);

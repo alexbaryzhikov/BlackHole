@@ -17,6 +17,7 @@
 
 #pragma mark - Uniforms
 
++ (void)updateModel;
 + (void)copyCamera:(Camera*)dst;
 
 @end

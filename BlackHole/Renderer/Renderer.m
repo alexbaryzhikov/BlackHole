@@ -88,6 +88,7 @@
 }
 
 - (void)updateUniforms {
+    [ModelBridge updateModel];
     [ModelBridge copyCamera:cameraBuffer.contents];
 }
 

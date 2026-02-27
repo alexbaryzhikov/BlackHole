@@ -25,4 +25,5 @@ typedef struct {
     float4 position;
     float yaw;
     float pitch;
+    float exposure;
 } Camera;

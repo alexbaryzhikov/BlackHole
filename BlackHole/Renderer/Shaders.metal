@@ -52,6 +52,6 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
-    outColor.rgb = sRGBToP3 * outColor.rgb;
+    outColor.rgb = sRGBToP3 * outColor.rgb * camera.exposure;
     outputTexture.write(outColor, gid);
 }

@@ -7,19 +7,19 @@ namespace BH::Mouse {
 bool buttonLeft = false;
 bool buttonRight = false;
 
-void leftButtonDown() {
+void leftButtonPressed() {
     buttonLeft = true;
 }
 
-void leftButtonUp() {
+void leftButtonReleased() {
     buttonLeft = false;
 }
 
-void rightButtonDown() {
+void rightButtonPressed() {
     buttonRight = true;
 }
 
-void rightButtonUp() {
+void rightButtonReleased() {
     buttonRight = false;
 }
 

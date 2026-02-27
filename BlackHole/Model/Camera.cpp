@@ -36,12 +36,16 @@ void mouseDidMove(float dx, float dy) {
 }
 
 void updateExposure() {
-    if (BH::Keyboard::keys[BH::Keyboard::keyUp]) {
+    if (BH::Keyboard::keys[BH::Keyboard::keyPeriod]) {
         exposureValue += CAMERA_EXPOSURE_DELTA;
         exposure = powf(2.0f, exposureValue);
     }
-    if (BH::Keyboard::keys[BH::Keyboard::keyDown]) {
+    if (BH::Keyboard::keys[BH::Keyboard::keyComma]) {
         exposureValue -= CAMERA_EXPOSURE_DELTA;
+        exposure = powf(2.0f, exposureValue);
+    }
+    if (BH::Keyboard::keys[BH::Keyboard::keyBackslash]) {
+        exposureValue = 0.0f;
         exposure = powf(2.0f, exposureValue);
     }
 }

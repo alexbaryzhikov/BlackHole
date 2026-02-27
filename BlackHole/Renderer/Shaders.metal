@@ -5,6 +5,7 @@ using namespace metal;
 #import "ShaderTypesInternal.hpp"
 
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
+constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
 
 constant float3x3 sRGBToP3 = {
     {0.82246, 0.03319, 0.01708}, // Column 0 (Red mapping)
@@ -39,6 +40,17 @@ float2 getSkyboxCoord(float4 normal) {
     return uv;
 }
 
+float3 applyEDRRollOff(float3 color, float edrHeadroom) {
+    float luma = dot(color, colorToLuma);
+    if (luma <= 1.0f) {
+        return color;
+    }
+    float headroom = edrHeadroom - 1.0f;
+    float excessLuma = luma - 1.0f;
+    float compressedLuma = 1.0f + headroom * (1.0f - exp(-excessLuma/headroom));
+    return color * (compressedLuma / luma);
+}
+
 kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],
                    array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
                    constant Camera& camera [[buffer(BufferIndexCamera)]],
@@ -52,6 +64,8 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
-    outColor.rgb = sRGBToP3 * outColor.rgb * camera.exposure;
+    outColor.rgb *= camera.exposure;
+    outColor.rgb = sRGBToP3 * outColor.rgb;
+    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
     outputTexture.write(outColor, gid);
 }

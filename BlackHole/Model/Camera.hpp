@@ -9,6 +9,8 @@ extern float exposure;
 
 void mouseDidMove(float dx, float dy);
 
+void mouseDidScroll(float dx, float dy);
+
 void update();
 
 } // namespace BH::Camera

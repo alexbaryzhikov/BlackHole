@@ -28,6 +28,7 @@ void moved(float dx, float dy) {
 }
 
 void scrolled(float dx, float dy) {
+    Camera::mouseDidScroll(dx, dy);
 }
 
 } // namespace BH::Mouse

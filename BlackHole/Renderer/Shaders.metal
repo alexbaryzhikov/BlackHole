@@ -4,6 +4,8 @@ using namespace metal;
 #import "../Config.h"
 #import "ShaderTypesInternal.hpp"
 
+constant constexpr float4 spherePosition = {0.0f, 0.0f, 0.0f, 1.0f};
+constant constexpr float sphereRadius = 10.0f;
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
 
@@ -33,8 +35,8 @@ float4 getRayNormal(constant Camera& camera, uint2 viewportSize, uint2 pixel) {
     return normalize(cameraRotation * direction);
 }
 
-float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 sphereCenter, float sphereRadius) {
-    float3 l = rayOrigin.xyz - sphereCenter.xyz;
+float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 spherePosition, float sphereRadius) {
+    float3 l = rayOrigin.xyz - spherePosition.xyz;
     float half_b = dot(rayNormal.xyz, l);
     float c = dot(l, l) - (sphereRadius * sphereRadius);
     float discriminant = half_b * half_b - c;
@@ -60,6 +62,12 @@ float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 sphereCenter, f
     }
 
     return t;
+}
+
+float4 getRayReflectedNormal(float4 rayNormal, float4 spherePosition, float4 intersectionPoint) {
+    float3 surfaceNormal = normalize(intersectionPoint.xyz - spherePosition.xyz);
+    float3 reflectedNormal = normalize(reflect(rayNormal.xyz, surfaceNormal));
+    return float4(reflectedNormal, 0.0f);
 }
 
 float2 getSkyboxCoord(float4 normal) {
@@ -100,8 +108,13 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
     }
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
     float4 outColor = float4(0);
-    if (getRaySphereHit(camera.position, rayNormal, float4(0), 10.0f) < 0) {
+    float t = getRaySphereHit(camera.position, rayNormal, spherePosition, sphereRadius);
+    if (t < 0.0f) {
         outColor = sampleSkybox(textures[TextureHeapIndexSkybox], rayNormal, camera.exposure, edrHeadroom);
+    } else {
+        float4 intersectionPoint = camera.position + rayNormal * t;
+        float4 rayReflectedNormal = getRayReflectedNormal(rayNormal, spherePosition, intersectionPoint);
+        outColor = sampleSkybox(textures[TextureHeapIndexSkybox], rayReflectedNormal, camera.exposure, edrHeadroom);
     }
     outputTexture.write(outColor, gid);
 }

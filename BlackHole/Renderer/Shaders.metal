@@ -7,7 +7,7 @@ using namespace metal;
 constant constexpr float4 spherePosition = {0.0f, 0.0f, 0.0f, 1.0f};
 constant constexpr float sphereRadius = 10.0f;
 
-constant constexpr float schwarzchildRadius = 2.0f;
+constant constexpr float eventHorizonRadius = 2.0f;
 constant constexpr float escapeRadius = 500.0f;
 constant constexpr int maxSteps = 1000;
 
@@ -81,6 +81,12 @@ float4 getRayReflectedNormal(float4 rayOrigin, float4 rayNormal, float4 spherePo
     }
 }
 
+float3 getAcceleration(float3 p, float h2) {
+    float r2 = length_squared(p);
+    float r5 = r2 * r2 * sqrt(r2);
+    return -1.5f * eventHorizonRadius * h2 / r5 * p;
+}
+
 float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured) {
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
@@ -89,17 +95,34 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
     captured = false;
     for (int i = 0; i < maxSteps; ++i) {
         float r = length(p);
-        if (r < schwarzchildRadius) {
+        if (r < eventHorizonRadius) {
             captured = true;
-            return float4(0.0f);
+            break;
         }
         if (r > escapeRadius && dot(p, v) > 0.0f) {
-            return float4(v, 0.0f);
+            break;
         }
-        float dt = 0.02f * r;
-        float3 a = -1.5f * schwarzchildRadius * h2 / pow(r, 5.0f) * p;
-        v += a * dt;
-        p += v * dt;
+        float dt = 0.05f * r;
+
+        float3 p0 = p;
+        float3 v0 = v;
+
+        float3 p1 = v0 * dt;
+        float3 v1 = getAcceleration(p0, h2) * dt;
+
+        float3 p2 = (v0 + 0.5f * v1) * dt;
+        float3 v2 = getAcceleration(p0 + 0.5f * p1, h2) * dt;
+
+        float3 p3 = (v0 + 0.5f * v2) * dt;
+        float3 v3 = getAcceleration(p0 + 0.5f * p2, h2) * dt;
+
+        float3 p4 = (v0 + v3) * dt;
+        float3 v4 = getAcceleration(p0 + p3, h2) * dt;
+
+        p += (p1 + 2.0f * p2 + 2.0f * p3 + p4) / 6.0f;
+        v += (v1 + 2.0f * v2 + 2.0f * v3 + v4) / 6.0f;
+
+        v = normalize(v);
     }
     return float4(v, 0.0f);
 }

@@ -6,6 +6,11 @@ using namespace metal;
 
 constant constexpr float4 spherePosition = {0.0f, 0.0f, 0.0f, 1.0f};
 constant constexpr float sphereRadius = 10.0f;
+
+constant constexpr float schwarzchildRadius = 2.0f;
+constant constexpr float escapeRadius = 500.0f;
+constant constexpr int maxSteps = 1000;
+
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
 
@@ -42,8 +47,8 @@ float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 spherePosition,
     float discriminant = half_b * half_b - c;
 
     // If discriminant is negative, the ray misses the sphere entirely
-    if (discriminant < 0.0) {
-        return -1.0;
+    if (discriminant < 0.0f) {
+        return -1.0f;
     }
 
     float sqrt_d = sqrt(discriminant);
@@ -52,22 +57,51 @@ float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 spherePosition,
     float t = -half_b - sqrt_d;
 
     // If the closest point is behind the camera/ray origin, try the other side
-    if (t < 0.0) {
+    if (t < 0.0f) {
         t = -half_b + sqrt_d;
     }
 
     // If both points are behind the origin, the intersection is not valid
-    if (t < 0.0) {
-        return -1.0;
+    if (t < 0.0f) {
+        return -1.0f;
     }
 
     return t;
 }
 
-float4 getRayReflectedNormal(float4 rayNormal, float4 spherePosition, float4 intersectionPoint) {
-    float3 surfaceNormal = normalize(intersectionPoint.xyz - spherePosition.xyz);
-    float3 reflectedNormal = normalize(reflect(rayNormal.xyz, surfaceNormal));
-    return float4(reflectedNormal, 0.0f);
+float4 getRayReflectedNormal(float4 rayOrigin, float4 rayNormal, float4 spherePosition, float sphereRadius) {
+    float t = getRaySphereHit(rayOrigin, rayNormal, spherePosition, sphereRadius);
+    if (t < 0.0f) {
+        return rayNormal;
+    } else {
+        float4 intersectionPoint = rayOrigin + rayNormal * t;
+        float3 surfaceNormal = normalize(intersectionPoint.xyz - spherePosition.xyz);
+        float3 reflectedNormal = normalize(reflect(rayNormal.xyz, surfaceNormal));
+        return float4(reflectedNormal, 0.0f);
+    }
+}
+
+float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured) {
+    float3 p = rayOrigin.xyz;
+    float3 v = rayNormal.xyz;
+    float3 angularMomentum = cross(p, v);
+    float h2 = length_squared(angularMomentum);
+    captured = false;
+    for (int i = 0; i < maxSteps; ++i) {
+        float r = length(p);
+        if (r < schwarzchildRadius) {
+            captured = true;
+            return float4(0.0f);
+        }
+        if (r > escapeRadius && dot(p, v) > 0.0f) {
+            return float4(v, 0.0f);
+        }
+        float dt = 0.02f * r;
+        float3 a = -1.5f * schwarzchildRadius * h2 / pow(r, 5.0f) * p;
+        v += a * dt;
+        p += v * dt;
+    }
+    return float4(v, 0.0f);
 }
 
 float2 getSkyboxCoord(float4 normal) {
@@ -98,6 +132,21 @@ float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNo
     return outColor;
 }
 
+float4 getReflectedColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
+    float4 rayReflectedNormal = getRayReflectedNormal(camera.position, rayNormal, spherePosition, sphereRadius);
+    return sampleSkybox(skybox, rayReflectedNormal, camera.exposure, edrHeadroom);
+}
+
+float4 getBentColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
+    bool captured;
+    float4 rayBentNormal = getRayBentNormal(camera.position, rayNormal, captured);
+    if (captured) {
+        return float(0.0f);
+    } else {
+        return sampleSkybox(skybox, rayBentNormal, camera.exposure, edrHeadroom);
+    }
+}
+
 kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],
                    array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
                    constant Camera& camera [[buffer(BufferIndexCamera)]],
@@ -107,14 +156,6 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
         return;
     }
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 outColor = float4(0);
-    float t = getRaySphereHit(camera.position, rayNormal, spherePosition, sphereRadius);
-    if (t < 0.0f) {
-        outColor = sampleSkybox(textures[TextureHeapIndexSkybox], rayNormal, camera.exposure, edrHeadroom);
-    } else {
-        float4 intersectionPoint = camera.position + rayNormal * t;
-        float4 rayReflectedNormal = getRayReflectedNormal(rayNormal, spherePosition, intersectionPoint);
-        outColor = sampleSkybox(textures[TextureHeapIndexSkybox], rayReflectedNormal, camera.exposure, edrHeadroom);
-    }
+    float4 outColor = getBentColor(camera, rayNormal, textures[TextureHeapIndexSkybox], edrHeadroom);
     outputTexture.write(outColor, gid);
 }

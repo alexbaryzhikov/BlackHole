@@ -7,9 +7,15 @@ using namespace metal;
 constant constexpr float4 spherePosition = {0.0f, 0.0f, 0.0f, 1.0f};
 constant constexpr float sphereRadius = 10.0f;
 
-constant constexpr float eventHorizonRadius = 2.0f;
+constant constexpr float eventHorizon = 1.0f;
 constant constexpr float escapeRadius = 500.0f;
 constant constexpr int maxSteps = 1000;
+
+constant constexpr bool accretionDiskVisible = false;
+constant constexpr float accretionDiskInner = 3.0f;
+constant constexpr float accretionDiskOuter = 12.0f;
+constant constexpr float3 accretionDiskCoreRGB = float3(2.0f, 2.0f, 2.0f);
+constant constexpr float3 accretionDiskRimRGB = float3(1.0f, 0.2f, 0.0f);
 
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
@@ -84,10 +90,19 @@ float4 getRayReflectedNormal(float4 rayOrigin, float4 rayNormal, float4 spherePo
 float3 getAcceleration(float3 p, float h2) {
     float r2 = length_squared(p);
     float r5 = r2 * r2 * sqrt(r2);
-    return -1.5f * eventHorizonRadius * h2 / r5 * p;
+    return -1.5f * eventHorizon * h2 / r5 * p;
 }
 
-float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured) {
+float4 getAccretionDiskColor(float r) {
+    float t = (r - accretionDiskInner) / (accretionDiskOuter - accretionDiskInner);
+    t = saturate(1.0f - t);
+    float intensity = smoothstep(0.0f, 1.0f, t);
+    float3 baseColor = mix(accretionDiskRimRGB, accretionDiskCoreRGB, intensity);
+    float alpha = intensity * 0.8f;
+    return float4(baseColor * intensity * 2.0f, alpha);
+}
+
+float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured, thread float4& accumulatedColor) {
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
     float3 angularMomentum = cross(p, v);
@@ -95,7 +110,7 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
     captured = false;
     for (int i = 0; i < maxSteps; ++i) {
         float r = length(p);
-        if (r < eventHorizonRadius) {
+        if (r < eventHorizon) {
             captured = true;
             break;
         }
@@ -104,6 +119,7 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
         }
         float dt = 0.05f * r;
 
+        // Runge-Kutta integration.
         float3 p0 = p;
         float3 v0 = v;
 
@@ -123,6 +139,21 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
         v += (v1 + 2.0f * v2 + 2.0f * v3 + v4) / 6.0f;
 
         v = normalize(v);
+
+        // Accretion disk intersection.
+        if (accretionDiskVisible && p0.z * p.z < 0.0f) {
+            float t = p0.z / (p0.z - p.z);
+            float3 hitPosition = mix(p0, p, t);
+            float hitRadius = length(hitPosition);
+            if (hitRadius > accretionDiskInner && hitRadius < accretionDiskOuter) {
+                float4 diskSample = getAccretionDiskColor(hitRadius);
+                accumulatedColor.rgb += diskSample.rgb * (1.0f - accumulatedColor.a);
+                accumulatedColor.a += diskSample.a * (1.0f - accumulatedColor.a);
+                if (accumulatedColor.a >= 0.99f) {
+                    break;
+                }
+            }
+        }
     }
     return float4(v, 0.0f);
 }
@@ -151,22 +182,27 @@ float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNo
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
     outColor.rgb *= exposure;
     outColor.rgb = sRGBToP3 * outColor.rgb;
-    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
     return outColor;
 }
 
 float4 getReflectedColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
     float4 rayReflectedNormal = getRayReflectedNormal(camera.position, rayNormal, spherePosition, sphereRadius);
-    return sampleSkybox(skybox, rayReflectedNormal, camera.exposure, edrHeadroom);
+    float4 outColor = sampleSkybox(skybox, rayReflectedNormal, camera.exposure, edrHeadroom);
+    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
+    return outColor;
 }
 
 float4 getBentColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
-    bool captured;
-    float4 rayBentNormal = getRayBentNormal(camera.position, rayNormal, captured);
-    if (captured) {
-        return float(0.0f);
+    bool captured = false;
+    float4 accumulatedColor = float(0.0f);
+    float4 rayBentNormal = getRayBentNormal(camera.position, rayNormal, captured, accumulatedColor);
+    if (!captured && accumulatedColor.a < 0.99f) {
+        float4 outColor = sampleSkybox(skybox, rayBentNormal, camera.exposure, edrHeadroom);
+        outColor = float4(accumulatedColor.rgb + outColor.rgb * (1.0f - accumulatedColor.a), 1.0f);
+        outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
+        return outColor;
     } else {
-        return sampleSkybox(skybox, rayBentNormal, camera.exposure, edrHeadroom);
+        return float4(accumulatedColor.rgb, 1.0f);
     }
 }
 

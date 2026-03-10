@@ -11,11 +11,9 @@ constant constexpr float eventHorizon = 1.0f;
 constant constexpr float escapeRadius = 500.0f;
 constant constexpr int maxSteps = 1000;
 
-constant constexpr bool accretionDiskVisible = false;
-constant constexpr float accretionDiskInner = 3.0f;
-constant constexpr float accretionDiskOuter = 12.0f;
-constant constexpr float3 accretionDiskCoreRGB = float3(2.0f, 2.0f, 2.0f);
-constant constexpr float3 accretionDiskRimRGB = float3(1.0f, 0.2f, 0.0f);
+constant constexpr bool accretionDiskVisible = true;
+constant constexpr float accretionDiskInner = 3.2f;
+constant constexpr float accretionDiskOuter = 15.0f;
 
 constant constexpr float2 anglesToUV = float2(1.0f / (M_PI_F * 2.0f), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
@@ -93,13 +91,81 @@ float3 getAcceleration(float3 p, float h2) {
     return -1.5f * eventHorizon * h2 / r5 * p;
 }
 
-float4 getAccretionDiskColor(float r) {
-    float t = (r - accretionDiskInner) / (accretionDiskOuter - accretionDiskInner);
-    t = saturate(1.0f - t);
-    float intensity = smoothstep(0.0f, 1.0f, t);
-    float3 baseColor = mix(accretionDiskRimRGB, accretionDiskCoreRGB, intensity);
-    float alpha = intensity * 0.8f;
-    return float4(baseColor * intensity * 2.0f, alpha);
+inline float hash21(float2 p) {
+    return fract(sin(dot(p, float2(12.9898f, 78.233f))) * 43758.5453123f);
+}
+
+inline float noise2D(float2 p) {
+    float2 i = floor(p);
+    float2 f = fract(p);
+
+    float a = hash21(i);
+    float b = hash21(i + float2(1.0f, 0.0f));
+    float c = hash21(i + float2(0.0f, 1.0f));
+    float d = hash21(i + float2(1.0f, 1.0f));
+
+    float2 u = f * f * (3.0f - 2.0f * f);
+
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// Fractal Brownian Motion for turbulent plasma layers
+inline float fbm(float2 p) {
+    float value = 0.0f;
+    float amplitude = 0.5f;
+    for (int i = 0; i < 4; i++) {
+        value += amplitude * noise2D(p);
+        p *= 2.0f;
+        amplitude *= 0.5f;
+    }
+    return value;
+}
+
+inline float4 getAccretionDiskColor(float2 pos) {
+    float r = length(pos);
+    float2 dir = pos / r;
+
+    float t = saturate((r - accretionDiskInner) / (accretionDiskOuter - accretionDiskInner));
+
+    float2 noiseCoords = dir * 2.0f + float2(r * 5.0f, 0.0f);
+    float fluidNoise = fbm(noiseCoords);
+
+    float spaceWarp = fbm(float2(r * 2.0f, 12.4f)) * 1.5f;
+    float warpedRadius = r + spaceWarp + fluidNoise * 0.25f;
+
+    float lowFreq  = sin(warpedRadius * 6.0f);
+    float midFreq  = sin(warpedRadius * 14.0f);
+    float highFreq = sin(warpedRadius * 32.0f);
+
+    float bands = (lowFreq * 0.55f + midFreq * 0.3f + highFreq * 0.15f);
+    bands = saturate(bands * 0.5f + 0.5f);
+
+    float bandPinch = mix(0.05f, 1.0f, t);
+    bands = pow(bands, bandPinch);
+
+    float coreGlow = smoothstep(0.4f, 0.0f, t);
+    bands = saturate(bands + coreGlow);
+
+    float innerFade = smoothstep(0.0f, 0.05f, t);
+    float outerFade = smoothstep(1.0f, 0.3f, t);
+    float radialFade = innerFade * outerFade;
+
+    float glowIntensity = (fluidNoise * 0.6f + 0.4f) * bands * radialFade;
+
+    float3 darkPlasma = float3(3.0f, 0.0f, 0.0f);
+    float3 midPlasma  = float3(14.0f, 2.5f, 0.2f);
+    float3 hotPlasma  = float3(25.0f, 15.0f, 8.0f);
+
+    float3 color = mix(darkPlasma, midPlasma, smoothstep(0.0f, 0.4f, glowIntensity));
+    color = mix(color, hotPlasma, smoothstep(0.4f, 0.8f, glowIntensity));
+
+    // Exponential core brightness.
+    float innerEdgeBoost = 1.0f + pow(1.0f - t, 4.0f) * 3.5f;
+    color *= innerEdgeBoost;
+
+    float alpha = glowIntensity * 0.9f;
+
+    return float4(color * alpha, alpha);
 }
 
 float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured, thread float4& accumulatedColor) {
@@ -146,7 +212,7 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
             if (hitRadius > accretionDiskInner && hitRadius < accretionDiskOuter) {
-                float4 diskSample = getAccretionDiskColor(hitRadius);
+                float4 diskSample = getAccretionDiskColor(hitPosition.xy);
                 accumulatedColor.rgb += diskSample.rgb * (1.0f - accumulatedColor.a);
                 accumulatedColor.a += diskSample.a * (1.0f - accumulatedColor.a);
                 if (accumulatedColor.a >= 0.99f) {

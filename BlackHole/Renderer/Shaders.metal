@@ -4,9 +4,6 @@ using namespace metal;
 #import "../Config.h"
 #import "ShaderTypesInternal.hpp"
 
-constant constexpr float4 spherePosition = {0.0f, 0.0f, 0.0f, 1.0f};
-constant constexpr float sphereRadius = 10.0f;
-
 constant constexpr float eventHorizon = 1.0f;
 constant constexpr float escapeRadius = 500.0f;
 constant constexpr int maxSteps = 1000;
@@ -44,47 +41,6 @@ float4 getRayNormal(constant Camera& camera, uint2 viewportSize, uint2 pixel) {
     return normalize(cameraRotation * direction);
 }
 
-float getRaySphereHit(float4 rayOrigin, float4 rayNormal, float4 spherePosition, float sphereRadius) {
-    float3 l = rayOrigin.xyz - spherePosition.xyz;
-    float half_b = dot(rayNormal.xyz, l);
-    float c = dot(l, l) - (sphereRadius * sphereRadius);
-    float discriminant = half_b * half_b - c;
-
-    // If discriminant is negative, the ray misses the sphere entirely
-    if (discriminant < 0.0f) {
-        return -1.0f;
-    }
-
-    float sqrt_d = sqrt(discriminant);
-
-    // Find the closest point of intersection
-    float t = -half_b - sqrt_d;
-
-    // If the closest point is behind the camera/ray origin, try the other side
-    if (t < 0.0f) {
-        t = -half_b + sqrt_d;
-    }
-
-    // If both points are behind the origin, the intersection is not valid
-    if (t < 0.0f) {
-        return -1.0f;
-    }
-
-    return t;
-}
-
-float4 getRayReflectedNormal(float4 rayOrigin, float4 rayNormal, float4 spherePosition, float sphereRadius) {
-    float t = getRaySphereHit(rayOrigin, rayNormal, spherePosition, sphereRadius);
-    if (t < 0.0f) {
-        return rayNormal;
-    } else {
-        float4 intersectionPoint = rayOrigin + rayNormal * t;
-        float3 surfaceNormal = normalize(intersectionPoint.xyz - spherePosition.xyz);
-        float3 reflectedNormal = normalize(reflect(rayNormal.xyz, surfaceNormal));
-        return float4(reflectedNormal, 0.0f);
-    }
-}
-
 float3 getAcceleration(float3 p, float h2) {
     float r2 = length_squared(p);
     float r5 = r2 * r2 * sqrt(r2);
@@ -109,7 +65,7 @@ inline float noise2D(float2 p) {
     return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Fractal Brownian Motion for turbulent plasma layers
+// Fractal Brownian Motion for turbulent plasma layers.
 inline float fbm(float2 p) {
     float value = 0.0f;
     float amplitude = 0.5f;
@@ -159,7 +115,6 @@ inline float4 getAccretionDiskColor(float2 pos) {
     float3 color = mix(darkPlasma, midPlasma, smoothstep(0.0f, 0.4f, glowIntensity));
     color = mix(color, hotPlasma, smoothstep(0.4f, 0.8f, glowIntensity));
 
-    // Exponential core brightness.
     float innerEdgeBoost = 1.0f + pow(1.0f - t, 4.0f) * 3.5f;
     color *= innerEdgeBoost;
 
@@ -168,12 +123,11 @@ inline float4 getAccretionDiskColor(float2 pos) {
     return float4(color * alpha, alpha);
 }
 
-float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& captured, thread float4& accumulatedColor) {
+void traceRay(float4 rayOrigin, float4 rayNormal, thread float4& outRayNormal, thread float4& accumulatedColor, thread bool& captured) {
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
     float3 angularMomentum = cross(p, v);
     float h2 = length_squared(angularMomentum);
-    captured = false;
     for (int i = 0; i < maxSteps; ++i) {
         float r = length(p);
         if (r < eventHorizon) {
@@ -221,7 +175,7 @@ float4 getRayBentNormal(float4 rayOrigin, float4 rayNormal, thread bool& capture
             }
         }
     }
-    return float4(v, 0.0f);
+    outRayNormal = float4(v, 0.0f);
 }
 
 float2 getSkyboxCoord(float4 normal) {
@@ -251,19 +205,13 @@ float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNo
     return outColor;
 }
 
-float4 getReflectedColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
-    float4 rayReflectedNormal = getRayReflectedNormal(camera.position, rayNormal, spherePosition, sphereRadius);
-    float4 outColor = sampleSkybox(skybox, rayReflectedNormal, camera.exposure, edrHeadroom);
-    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
-    return outColor;
-}
-
-float4 getBentColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
-    bool captured = false;
+float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
+    float4 outRayNormal = float(0.0f);
     float4 accumulatedColor = float(0.0f);
-    float4 rayBentNormal = getRayBentNormal(camera.position, rayNormal, captured, accumulatedColor);
+    bool captured = false;
+    traceRay(camera.position, rayNormal, outRayNormal, accumulatedColor, captured);
     if (!captured && accumulatedColor.a < 0.99f) {
-        float4 outColor = sampleSkybox(skybox, rayBentNormal, camera.exposure, edrHeadroom);
+        float4 outColor = sampleSkybox(skybox, outRayNormal, camera.exposure, edrHeadroom);
         outColor = float4(accumulatedColor.rgb + outColor.rgb * (1.0f - accumulatedColor.a), 1.0f);
         outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
         return outColor;
@@ -281,6 +229,6 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
         return;
     }
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 outColor = getBentColor(camera, rayNormal, textures[TextureHeapIndexSkybox], edrHeadroom);
-    outputTexture.write(outColor, gid);
+    float4 color = getColor(camera, rayNormal, textures[TextureHeapIndexSkybox], edrHeadroom);
+    outputTexture.write(color, gid);
 }

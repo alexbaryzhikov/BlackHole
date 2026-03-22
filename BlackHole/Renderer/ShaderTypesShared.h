@@ -19,6 +19,7 @@ typedef enum {
 typedef enum {
     BufferIndexCamera,
     BufferIndexEDRHeadroom,
+    BufferIndexTime,
 } BufferIndex;
 
 typedef struct {

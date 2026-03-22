@@ -3,6 +3,7 @@
 #import "ModelBridge.h"
 #import "ShaderTypesShared.h"
 #import "TextureLoader.h"
+#import <QuartzCore/QuartzCore.h>
 
 @implementation Renderer {
     __weak MTKView* mtkView;
@@ -11,6 +12,9 @@
     id<MTLComputePipelineState> computePipelineState;
     id<MTLTexture> textures[TEXTURE_HEAP_SIZE];
     id<MTLBuffer> cameraBuffer;
+
+    double timeStart;
+    float time;
 }
 
 - (nonnull instancetype)initWithMetalKitView:(nonnull MTKView*)view {
@@ -22,6 +26,9 @@
         [self setupMetalPipeline];
         [self createBuffers];
         [self loadSkybox];
+
+        timeStart = CACurrentMediaTime();
+        time = 0;
     }
     return self;
 }
@@ -75,6 +82,7 @@
     }
     [commandEncoder setBuffer:cameraBuffer offset:0 atIndex:BufferIndexCamera];
     [commandEncoder setBytes:&edrHeadroom length:sizeof(float) atIndex:BufferIndexEDRHeadroom];
+    [commandEncoder setBytes:&time length:sizeof(float) atIndex:BufferIndexTime];
 
     NSUInteger width = computePipelineState.threadExecutionWidth;
     NSUInteger height = computePipelineState.maxTotalThreadsPerThreadgroup / width;
@@ -90,6 +98,7 @@
 - (void)updateUniforms {
     [ModelBridge updateModel];
     [ModelBridge copyCamera:cameraBuffer.contents];
+    time = CACurrentMediaTime() - timeStart;
 }
 
 - (float)getEDRHeadroom {

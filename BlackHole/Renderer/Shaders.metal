@@ -8,9 +8,10 @@ constant constexpr float eventHorizon = 1.0;
 constant constexpr float escapeRadius = 500.0;
 constant constexpr int maxSteps = 1000;
 
-constant constexpr bool accretionDiskVisible = true;
-constant constexpr float accretionDiskInner = 3.2;
-constant constexpr float accretionDiskOuter = 15.0;
+constant constexpr bool diskVisible = true;
+constant constexpr float diskInnerRadius = 3.2;
+constant constexpr float diskOuterRadius = 15.0;
+constant constexpr float diskRotationSpeed = 10.0;
 
 constant constexpr float2 anglesToUV = float2(1.0 / (M_PI_F * 2.0), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
@@ -20,6 +21,13 @@ constant float3x3 sRGBToP3 = {
     {0.17754, 0.96681, 0.07240}, // Column 1 (Green mapping)
     {0.00000, 0.00000, 0.91052}  // Column 2 (Blue mapping)
 };
+
+float2x2 makeRotation(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return float2x2(float2(c, -s),
+                    float2(s, c));
+}
 
 float4x4 makeRotation(float yaw, float pitch) {
     float cy = cos(yaw);
@@ -77,12 +85,19 @@ inline float fbm(float2 p) {
     return value;
 }
 
-inline float4 getAccretionDiskColor(float2 pos) {
-    float r = length(pos);
+inline float4 getAccretionDiskColor(float2 position, float time) {
+    float r = length(position);
+    
+    // Keplerian differential rotation of the disk.
+    float angularVelocity = diskRotationSpeed / sqrt(r * r * r);
+    float angle = time * angularVelocity;
+    float2x2 rotation = makeRotation(angle);
+    float2 rotatedPosition = rotation * position;
+    float2 direction = rotatedPosition / r;
 
-    float t = saturate((r - accretionDiskInner) / (accretionDiskOuter - accretionDiskInner));
+    float t = saturate((r - diskInnerRadius) / (diskOuterRadius - diskInnerRadius));
 
-    float2 noiseCoords = 2.0 * pos / r + float2(r * 5.0, 0.0);
+    float2 noiseCoords = direction * 2.0 + float2(r * 5.0, 0.0);
     float fluidNoise = fbm(noiseCoords);
 
     float spaceWarp = fbm(float2(r * 2.0, 12.4)) * 1.5;
@@ -126,7 +141,7 @@ float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
     float3 photonDirection = -rayNormal;
     float gamma = 1.0 / sqrt(1.0 - gasSpeed * gasSpeed);
     float dopplerFactor = 1.0 / (gamma * (1.0 - dot(gasVelocity, photonDirection)));
-    float beaming = pow(dopplerFactor, 3.0);
+    float beaming = dopplerFactor * dopplerFactor * dopplerFactor;
     float3 colorShift = float3(
         pow(dopplerFactor, -0.6), // Red channel thrives when receding
         pow(dopplerFactor, 0.2),  // Green gets a slight bump
@@ -135,7 +150,7 @@ float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
     return colorShift * beaming;
 }
 
-void traceRay(float4 rayOrigin, float4 rayNormal, thread float4& outRayNormal, thread float4& accumulatedColor, thread bool& captured) {
+void traceRay(float4 rayOrigin, float4 rayNormal, float time, thread float4& outRayNormal, thread float4& accumulatedColor, thread bool& captured) {
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
     float3 angularMomentum = cross(p, v);
@@ -173,12 +188,12 @@ void traceRay(float4 rayOrigin, float4 rayNormal, thread float4& outRayNormal, t
         v = normalize(v);
 
         // Accretion disk intersection.
-        if (accretionDiskVisible && p0.z * p.z < 0.0) {
+        if (diskVisible && p0.z * p.z < 0.0) {
             float t = p0.z / (p0.z - p.z);
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
-            if (hitRadius > accretionDiskInner && hitRadius < accretionDiskOuter) {
-                float4 diskColor = getAccretionDiskColor(hitPosition.xy);
+            if (hitRadius > diskInnerRadius && hitRadius < diskOuterRadius) {
+                float4 diskColor = getAccretionDiskColor(hitPosition.xy, time);
                 float3 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
                 diskColor.rgb *= dopplerShift;
                 accumulatedColor.rgb += diskColor.rgb * (1.0 - accumulatedColor.a);
@@ -218,11 +233,11 @@ float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNo
     return outColor;
 }
 
-float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> skybox, float edrHeadroom) {
+float4 getColor(constant Camera& camera, float4 rayNormal, float time, texture2d<float, access::sample> skybox, float edrHeadroom) {
     float4 outRayNormal = float(0.0);
     float4 accumulatedColor = float(0.0);
     bool captured = false;
-    traceRay(camera.position, rayNormal, outRayNormal, accumulatedColor, captured);
+    traceRay(camera.position, rayNormal, time, outRayNormal, accumulatedColor, captured);
     float4 outColor;
     if (!captured && accumulatedColor.a < 0.99) {
         outColor = sampleSkybox(skybox, outRayNormal, edrHeadroom);
@@ -239,11 +254,12 @@ kernel void render(texture2d<float, access::write> outputTexture [[texture(Textu
                    array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
                    constant Camera& camera [[buffer(BufferIndexCamera)]],
                    constant float& edrHeadroom [[buffer(BufferIndexEDRHeadroom)]],
+                   constant float& time [[buffer(BufferIndexTime)]],
                    uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
         return;
     }
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 color = getColor(camera, rayNormal, textures[TextureHeapIndexSkybox], edrHeadroom);
+    float4 color = getColor(camera, rayNormal, time, textures[TextureHeapIndexSkybox], edrHeadroom);
     outputTexture.write(color, gid);
 }

@@ -79,11 +79,10 @@ inline float fbm(float2 p) {
 
 inline float4 getAccretionDiskColor(float2 pos) {
     float r = length(pos);
-    float2 dir = pos / r;
 
     float t = saturate((r - accretionDiskInner) / (accretionDiskOuter - accretionDiskInner));
 
-    float2 noiseCoords = dir * 2.0f + float2(r * 5.0f, 0.0f);
+    float2 noiseCoords = 2.0f * pos / r + float2(r * 5.0f, 0.0f);
     float fluidNoise = fbm(noiseCoords);
 
     float spaceWarp = fbm(float2(r * 2.0f, 12.4f)) * 1.5f;
@@ -108,19 +107,32 @@ inline float4 getAccretionDiskColor(float2 pos) {
 
     float glowIntensity = (fluidNoise * 0.6f + 0.4f) * bands * radialFade;
 
-    float3 darkPlasma = float3(3.0f, 0.0f, 0.0f);
-    float3 midPlasma  = float3(14.0f, 2.5f, 0.2f);
-    float3 hotPlasma  = float3(25.0f, 15.0f, 8.0f);
+    float3 darkPlasma = float3(2.0f, 0.2f, 0.3f);
+    float3 midPlasma  = float3(7.8f, 0.6f, 0.5f);
+    float3 hotPlasma  = float3(12.0f, 4.5f, 2.0f);
 
     float3 color = mix(darkPlasma, midPlasma, smoothstep(0.0f, 0.4f, glowIntensity));
     color = mix(color, hotPlasma, smoothstep(0.4f, 0.8f, glowIntensity));
 
-    float innerEdgeBoost = 1.0f + pow(1.0f - t, 4.0f) * 3.5f;
-    color *= innerEdgeBoost;
-
     float alpha = glowIntensity * 0.9f;
 
     return float4(color * alpha, alpha);
+}
+
+float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
+    float3 gasDirection = normalize(cross(float3(0.0, 0.0, 1.0), hitPosition));
+    float gasSpeed = sqrt(0.5 * eventHorizon / hitRadius);
+    float3 gasVelocity = gasDirection * gasSpeed;
+    float3 photonDirection = -rayNormal;
+    float gamma = 1.0 / sqrt(1.0 - gasSpeed * gasSpeed);
+    float dopplerFactor = 1.0 / (gamma * (1.0 - dot(gasVelocity, photonDirection)));
+    float beaming = pow(dopplerFactor, 3.0);
+    float3 colorShift = float3(
+        pow(dopplerFactor, -0.6), // Red channel thrives when receding
+        pow(dopplerFactor, 0.2),  // Green gets a slight bump
+        pow(dopplerFactor, 1.5)   // Blue channel explodes when approaching
+    );
+    return colorShift * beaming;
 }
 
 void traceRay(float4 rayOrigin, float4 rayNormal, thread float4& outRayNormal, thread float4& accumulatedColor, thread bool& captured) {
@@ -166,9 +178,11 @@ void traceRay(float4 rayOrigin, float4 rayNormal, thread float4& outRayNormal, t
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
             if (hitRadius > accretionDiskInner && hitRadius < accretionDiskOuter) {
-                float4 diskSample = getAccretionDiskColor(hitPosition.xy);
-                accumulatedColor.rgb += diskSample.rgb * (1.0f - accumulatedColor.a);
-                accumulatedColor.a += diskSample.a * (1.0f - accumulatedColor.a);
+                float4 diskColor = getAccretionDiskColor(hitPosition.xy);
+                float3 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
+                diskColor.rgb *= dopplerShift;
+                accumulatedColor.rgb += diskColor.rgb * (1.0f - accumulatedColor.a);
+                accumulatedColor.a += diskColor.a * (1.0f - accumulatedColor.a);
                 if (accumulatedColor.a >= 0.99f) {
                     break;
                 }

@@ -210,11 +210,10 @@ float3 applyEDRRollOff(float3 color, float edrHeadroom) {
     return color * (compressedLuma / luma);
 }
 
-float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal, float exposure, float edrHeadroom) {
+float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal, float edrHeadroom) {
     constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
-    outColor.rgb *= exposure;
     outColor.rgb = sRGBToP3 * outColor.rgb;
     return outColor;
 }
@@ -224,14 +223,16 @@ float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, acce
     float4 accumulatedColor = float(0.0f);
     bool captured = false;
     traceRay(camera.position, rayNormal, outRayNormal, accumulatedColor, captured);
+    float4 outColor;
     if (!captured && accumulatedColor.a < 0.99f) {
-        float4 outColor = sampleSkybox(skybox, outRayNormal, camera.exposure, edrHeadroom);
+        outColor = sampleSkybox(skybox, outRayNormal, edrHeadroom);
         outColor = float4(accumulatedColor.rgb + outColor.rgb * (1.0f - accumulatedColor.a), 1.0f);
-        outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
-        return outColor;
     } else {
-        return float4(accumulatedColor.rgb, 1.0f);
+        outColor = float4(accumulatedColor.rgb, 1.0f);
     }
+    outColor.rgb *= camera.exposure;
+    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
+    return outColor;
 }
 
 kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],

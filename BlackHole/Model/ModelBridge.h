@@ -1,4 +1,4 @@
-#import "ShaderTypesShared.h"
+#import "RayMarchingTypes.h"
 #import <AppKit/AppKit.h>
 
 @interface ModelBridge : NSObject

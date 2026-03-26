@@ -1,4 +1,4 @@
-#import "ShaderTypesShared.h"
+#include <simd/simd.h>
 
 namespace BH::Camera {
 

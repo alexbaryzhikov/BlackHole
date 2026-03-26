@@ -1,17 +1,5 @@
-#include <metal_stdlib>
-using namespace metal;
-
 #import "../Config.h"
-#import "ShaderTypesInternal.hpp"
-
-constant constexpr float eventHorizon = 1.0;
-constant constexpr float escapeRadius = 500.0;
-constant constexpr int maxSteps = 1000;
-
-constant constexpr bool diskVisible = true;
-constant constexpr float diskInnerRadius = 3.2;
-constant constexpr float diskOuterRadius = 15.0;
-constant constexpr float diskRotationSpeed = 10.0;
+#import "RayMarchingTypes.h"
 
 constant constexpr float2 anglesToUV = float2(1.0 / (M_PI_F * 2.0), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
@@ -52,7 +40,7 @@ float4 getRayNormal(constant Camera& camera, uint2 viewportSize, uint2 pixel) {
 float3 getAcceleration(float3 p, float h2) {
     float r2 = length_squared(p);
     float r5 = r2 * r2 * sqrt(r2);
-    return -1.5 * eventHorizon * h2 / r5 * p;
+    return -1.5 * EVENT_HORIZON * h2 / r5 * p;
 }
 
 inline float hash21(float2 p) {
@@ -85,58 +73,22 @@ inline float fbm(float2 p) {
     return value;
 }
 
-inline float4 getAccretionDiskColor(float2 position, float time) {
+inline float4 getAccretionDiskColor(float2 position, texture2d<float, access::sample> densityMap) {
     float r = length(position);
     
-    // Keplerian differential rotation of the disk.
-    float angularVelocity = diskRotationSpeed / sqrt(r * r * r);
-    float angle = time * angularVelocity;
-    float2x2 rotation = makeRotation(angle);
-    float2 rotatedPosition = rotation * position;
-    float2 direction = rotatedPosition / r;
-
-    float t = saturate((r - diskInnerRadius) / (diskOuterRadius - diskInnerRadius));
-
-    float2 noiseCoords = direction * 2.0 + float2(r * 5.0, 0.0);
-    float fluidNoise = fbm(noiseCoords);
-
-    float spaceWarp = fbm(float2(r * 2.0, 12.4)) * 1.5;
-    float warpedRadius = r + spaceWarp + fluidNoise * 0.25;
-
-    float lowFreq  = sin(warpedRadius * 6.0);
-    float midFreq  = sin(warpedRadius * 14.0);
-    float highFreq = sin(warpedRadius * 32.0);
-
-    float bands = (lowFreq * 0.55 + midFreq * 0.3 + highFreq * 0.15);
-    bands = saturate(bands * 0.5 + 0.5);
-
-    float bandPinch = mix(0.05, 1.0, t);
-    bands = pow(bands, bandPinch);
-
-    float coreGlow = smoothstep(0.4, 0.0, t);
-    bands = saturate(bands + coreGlow);
-
-    float innerFade = smoothstep(0.0, 0.05, t);
-    float outerFade = smoothstep(1.0, 0.3, t);
-    float radialFade = innerFade * outerFade;
-
-    float glowIntensity = (fluidNoise * 0.6 + 0.4) * bands * radialFade;
-
-    float3 darkPlasma = float3(2.0, 0.2, 0.3);
-    float3 midPlasma  = float3(7.8, 0.6, 0.5);
-    float3 hotPlasma  = float3(12.0, 4.5, 2.0);
-
-    float3 color = mix(darkPlasma, midPlasma, smoothstep(0.0, 0.4, glowIntensity));
-    color = mix(color, hotPlasma, smoothstep(0.4, 0.8, glowIntensity));
-
-    float alpha = glowIntensity * 0.9;
-
-    return float4(color * alpha, alpha);
+    float2 baseUV = (position / (DISK_OUTER_RADIUS * 2.0)) + 0.5;
+    if (baseUV.x < 0.0 || baseUV.x > 1.0 || baseUV.y < 0.0 || baseUV.y > 1.0) {
+        return float4(0.0);
+    }
+    
+    constexpr sampler textureSampler(coord::normalized, address::clamp_to_zero, filter::linear);
+    float density = densityMap.sample(textureSampler, baseUV).r;
+    return float4(float3(1.0) * density, density);
 }
 
 float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
     float3 gasDirection = normalize(cross(float3(0.0, 0.0, 1.0), hitPosition));
-    float gasSpeed = sqrt(0.5 * eventHorizon / hitRadius);
+    float gasSpeed = sqrt(0.5 * EVENT_HORIZON / hitRadius);
     float3 gasVelocity = gasDirection * gasSpeed;
     float3 photonDirection = -rayNormal;
     float gamma = 1.0 / sqrt(1.0 - gasSpeed * gasSpeed);
@@ -150,18 +102,23 @@ float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
     return colorShift * beaming;
 }
 
-void traceRay(float4 rayOrigin, float4 rayNormal, float time, thread float4& outRayNormal, thread float4& accumulatedColor, thread bool& captured) {
+void traceRay(float4 rayOrigin,
+              float4 rayNormal,
+              texture2d<float, access::sample> densityMap,
+              thread float4& outRayNormal,
+              thread float4& accumulatedColor,
+              thread bool& captured) {
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
     float3 angularMomentum = cross(p, v);
     float h2 = length_squared(angularMomentum);
-    for (int i = 0; i < maxSteps; ++i) {
+    for (int i = 0; i < MAX_MARCHING_STEPS; ++i) {
         float r = length(p);
-        if (r < eventHorizon) {
+        if (r < EVENT_HORIZON) {
             captured = true;
             break;
         }
-        if (r > escapeRadius && dot(p, v) > 0.0) {
+        if (r > ESCAPE_RADIUS && dot(p, v) > 0.0) {
             break;
         }
         float dt = 0.05 * r;
@@ -188,12 +145,12 @@ void traceRay(float4 rayOrigin, float4 rayNormal, float time, thread float4& out
         v = normalize(v);
 
         // Accretion disk intersection.
-        if (diskVisible && p0.z * p.z < 0.0) {
+        if (DISK_VISIBLE && p0.z * p.z < 0.0) {
             float t = p0.z / (p0.z - p.z);
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
-            if (hitRadius > diskInnerRadius && hitRadius < diskOuterRadius) {
-                float4 diskColor = getAccretionDiskColor(hitPosition.xy, time);
+            if (hitRadius > DISK_INNER_RADIUS && hitRadius < DISK_OUTER_RADIUS) {
+                float4 diskColor = getAccretionDiskColor(hitPosition.xy, densityMap);
                 float3 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
                 diskColor.rgb *= dopplerShift;
                 accumulatedColor.rgb += diskColor.rgb * (1.0 - accumulatedColor.a);
@@ -214,6 +171,14 @@ float2 getSkyboxCoord(float4 normal) {
     return uv;
 }
 
+float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal, float edrHeadroom) {
+    constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
+    float2 readCoord = getSkyboxCoord(rayNormal);
+    float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
+    outColor.rgb = sRGBToP3 * outColor.rgb;
+    return outColor;
+}
+
 float3 applyEDRRollOff(float3 color, float edrHeadroom) {
     float luma = dot(color, colorToLuma);
     if (luma <= 1.0) {
@@ -225,19 +190,11 @@ float3 applyEDRRollOff(float3 color, float edrHeadroom) {
     return color * (compressedLuma / luma);
 }
 
-float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal, float edrHeadroom) {
-    constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
-    float2 readCoord = getSkyboxCoord(rayNormal);
-    float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
-    outColor.rgb = sRGBToP3 * outColor.rgb;
-    return outColor;
-}
-
-float4 getColor(constant Camera& camera, float4 rayNormal, float time, texture2d<float, access::sample> skybox, float edrHeadroom) {
+float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> densityMap, texture2d<float, access::sample> skybox, float edrHeadroom) {
     float4 outRayNormal = float(0.0);
     float4 accumulatedColor = float(0.0);
     bool captured = false;
-    traceRay(camera.position, rayNormal, time, outRayNormal, accumulatedColor, captured);
+    traceRay(camera.position, rayNormal, densityMap, outRayNormal, accumulatedColor, captured);
     float4 outColor;
     if (!captured && accumulatedColor.a < 0.99) {
         outColor = sampleSkybox(skybox, outRayNormal, edrHeadroom);
@@ -250,16 +207,13 @@ float4 getColor(constant Camera& camera, float4 rayNormal, float time, texture2d
     return outColor;
 }
 
-kernel void render(texture2d<float, access::write> outputTexture [[texture(TextureIndexOutput)]],
-                   array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(TextureIndexHeap)]],
-                   constant Camera& camera [[buffer(BufferIndexCamera)]],
-                   constant float& edrHeadroom [[buffer(BufferIndexEDRHeadroom)]],
-                   constant float& time [[buffer(BufferIndexTime)]],
-                   uint2 gid [[thread_position_in_grid]]) {
-    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) {
-        return;
-    }
+kernel void marchRays(texture2d<float, access::write> outputTexture [[texture(RayMarchingTextureIndexOutput)]],
+                      array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(RayMarchingTextureIndexHeap)]],
+                      constant Camera& camera [[buffer(RayMarchingBufferIndexCamera)]],
+                      constant float& edrHeadroom [[buffer(RayMarchingBufferIndexEDRHeadroom)]],
+                      uint2 gid [[thread_position_in_grid]]) {
+    if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) return;
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 color = getColor(camera, rayNormal, time, textures[TextureHeapIndexSkybox], edrHeadroom);
+    float4 color = getColor(camera, rayNormal, textures[TextureHeapIndexParticleDensity], textures[TextureHeapIndexSkybox], edrHeadroom);
     outputTexture.write(color, gid);
 }

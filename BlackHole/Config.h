@@ -12,18 +12,8 @@
 #define MOUSE_SENSITIVITY           1.0f
 #define MOUSE_ZOOM_SENSITIVITY      1.0f
 
-// Black hole
-#define EVENT_HORIZON               1.0f
-#define ESCAPE_RADIUS               500.0f
-#define MAX_MARCHING_STEPS          1000
-
 // Accretion disk
-#define DISK_VISIBLE                true
 #define DISK_INNER_RADIUS           3.2f
 #define DISK_OUTER_RADIUS           15.0f
-#define DISK_ROTATION_SPEED         10.0f
-#define PARTICLE_COUNT              150000
-#define PARTICLE_SCALE              100.0f
-#define PARTICLE_SOFTNESS           2.0f
-#define PARTICLE_TRANSPARENCY       0.1f
-#define SPLAT_TEXTURE_RESOLUTION    2048
+#define PARTICLE_COUNT              500000
+#define SPLAT_TEXTURE_RESOLUTION    4096

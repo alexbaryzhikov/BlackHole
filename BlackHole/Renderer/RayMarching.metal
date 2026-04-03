@@ -1,6 +1,11 @@
 #import "../Config.h"
 #import "RayMarchingTypes.h"
 
+#define EVENT_HORIZON               1.0f
+#define ESCAPE_RADIUS               500.0f
+#define MAX_MARCHING_STEPS          1000
+#define DISK_VISIBLE                true
+
 constant constexpr float2 anglesToUV = float2(1.0 / (M_PI_F * 2.0), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
 
@@ -73,33 +78,50 @@ inline float fbm(float2 p) {
     return value;
 }
 
-inline float4 getAccretionDiskColor(float2 position, texture2d<float, access::sample> densityMap) {
-    float r = length(position);
-    
-    float2 baseUV = (position / (DISK_OUTER_RADIUS * 2.0)) + 0.5;
-    if (baseUV.x < 0.0 || baseUV.x > 1.0 || baseUV.y < 0.0 || baseUV.y > 1.0) {
-        return float4(0.0);
+inline float4 sampleAccretionDisk(float2 position, texture2d<float, access::sample> densityMap) {
+    constexpr sampler textureSampler(coord::normalized, address::clamp_to_zero, filter::linear);
+    constexpr bool shearEnabled = true;
+    constexpr float baseShear = 8.0;
+    constexpr int sampleCount = 100;
+
+    float density = 0.0;
+
+    if (shearEnabled) {
+        float r = length(position);
+        float angularShift = baseShear / (r * sqrt(r));
+        
+        float2x2 sampleRotation = makeRotation(angularShift / float(sampleCount));
+        float2 samplePosition = makeRotation(-angularShift / 2.0) * position;
+        
+        for (int i = 0; i < sampleCount; ++i) {
+            float2 sampleUV = (samplePosition / DISK_OUTER_RADIUS + 1.0) / 2.0;
+            float intensity = (i < sampleCount / 2 ? float(i) : float(sampleCount - i)) / float(sampleCount / 2);
+            density += densityMap.sample(textureSampler, sampleUV).r * intensity;
+            samplePosition = sampleRotation * samplePosition;
+        }
+        density /= float(sampleCount);
+    } else {
+        float2 sampleUV = (position / DISK_OUTER_RADIUS + 1.0) / 2.0;
+        density = densityMap.sample(textureSampler, sampleUV).r;
     }
     
-    constexpr sampler textureSampler(coord::normalized, address::clamp_to_zero, filter::linear);
-    float density = densityMap.sample(textureSampler, baseUV).r;
     return float4(float3(1.0) * density, density);
 }
 
-float3 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
+float4 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
     float3 gasDirection = normalize(cross(float3(0.0, 0.0, 1.0), hitPosition));
-    float gasSpeed = sqrt(0.5 * EVENT_HORIZON / hitRadius);
+    float gasSpeed = sqrt(0.9 * EVENT_HORIZON / hitRadius);
     float3 gasVelocity = gasDirection * gasSpeed;
     float3 photonDirection = -rayNormal;
     float gamma = 1.0 / sqrt(1.0 - gasSpeed * gasSpeed);
     float dopplerFactor = 1.0 / (gamma * (1.0 - dot(gasVelocity, photonDirection)));
     float beaming = dopplerFactor * dopplerFactor * dopplerFactor;
     float3 colorShift = float3(
-        pow(dopplerFactor, -0.6), // Red channel thrives when receding
-        pow(dopplerFactor, 0.2),  // Green gets a slight bump
-        pow(dopplerFactor, 1.5)   // Blue channel explodes when approaching
+        pow(dopplerFactor, -0.7),
+        pow(dopplerFactor, 0.1),
+        pow(dopplerFactor, 0.9)
     );
-    return colorShift * beaming;
+    return float4(colorShift * beaming, beaming);
 }
 
 void traceRay(float4 rayOrigin,
@@ -150,9 +172,9 @@ void traceRay(float4 rayOrigin,
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
             if (hitRadius > DISK_INNER_RADIUS && hitRadius < DISK_OUTER_RADIUS) {
-                float4 diskColor = getAccretionDiskColor(hitPosition.xy, densityMap);
-                float3 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
-                diskColor.rgb *= dopplerShift;
+                float4 diskColor = sampleAccretionDisk(hitPosition.xy, densityMap);
+                float4 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
+                diskColor *= dopplerShift;
                 accumulatedColor.rgb += diskColor.rgb * (1.0 - accumulatedColor.a);
                 accumulatedColor.a += diskColor.a * (1.0 - accumulatedColor.a);
                 if (accumulatedColor.a >= 0.99) {

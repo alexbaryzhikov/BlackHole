@@ -91,15 +91,18 @@
 }
 
 - (void)initializeParticles {
+    const float densityFalloff = 1.5;
+    
     GasParticle* particles = (GasParticle*)particleBuffer.contents;
     for (NSUInteger i = 0; i < PARTICLE_COUNT; i++) {
-        float t = (float)arc4random() / UINT32_MAX;
-        float radius = DISK_INNER_RADIUS + t * t * (DISK_OUTER_RADIUS - DISK_INNER_RADIUS);
+        float t = MAX((float)arc4random() / UINT32_MAX, 0.000001f);
+        float radius = DISK_INNER_RADIUS - logf(t) * densityFalloff;
+        if (radius > DISK_OUTER_RADIUS) radius = DISK_INNER_RADIUS;
         float angle = ((float)arc4random() / UINT32_MAX) * M_PI * 2.0;
         particles[i].radius = radius;
         particles[i].angle = angle;
         particles[i].position = simd_make_float2(cosf(angle) * radius, sinf(angle) * radius);
-        particles[i].mass = ((float)arc4random() / UINT32_MAX) * 0.5f + 0.2f;
+        particles[i].mass = ((float)arc4random() / UINT32_MAX) * 0.5f + 0.5f;
     }
 }
 

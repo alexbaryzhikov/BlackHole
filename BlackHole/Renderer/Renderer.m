@@ -114,8 +114,8 @@
 
 - (void)setupParticleDensityTexture {
     MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float
-                                                                                    width:SPLAT_TEXTURE_RESOLUTION
-                                                                                   height:SPLAT_TEXTURE_RESOLUTION
+                                                                                    width:DENSITY_MAP_RESOLUTION
+                                                                                   height:DENSITY_MAP_RESOLUTION
                                                                                 mipmapped:NO];
     desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
     desc.storageMode = MTLStorageModePrivate;

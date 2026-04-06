@@ -16,4 +16,4 @@
 #define DISK_INNER_RADIUS           3.2f
 #define DISK_OUTER_RADIUS           15.0f
 #define PARTICLE_COUNT              500000
-#define SPLAT_TEXTURE_RESOLUTION    4096
+#define DENSITY_MAP_RESOLUTION      4096

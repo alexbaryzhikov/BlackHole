@@ -12,7 +12,8 @@
     id<MTLComputePipelineState> updateParticlesState;
     id<MTLRenderPipelineState> splatParticlesState;
     id<MTLComputePipelineState> rayMarchingState;
-    id<MTLTexture> textures[TEXTURE_HEAP_SIZE];
+    id<MTLTexture> skyboxTexture;
+    id<MTLTexture> densityTexture;
     id<MTLBuffer> cameraBuffer;
     id<MTLBuffer> particleBuffer;
 
@@ -109,7 +110,7 @@
 - (void)loadSkybox {
     TextureLoader* loader = [[TextureLoader alloc] initWithDevice:device];
     NSURL* url = [NSBundle.mainBundle URLForResource:@"nebula" withExtension:@"exr"];
-    textures[TextureHeapIndexSkybox] = [loader loadEXR:url];
+    skyboxTexture = [loader loadEXR:url];
 }
 
 - (void)setupParticleDensityTexture {
@@ -119,7 +120,7 @@
                                                                                 mipmapped:NO];
     desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
     desc.storageMode = MTLStorageModePrivate;
-    textures[TextureHeapIndexParticleDensity] = [device newTextureWithDescriptor:desc];
+    densityTexture = [device newTextureWithDescriptor:desc];
 }
 
 - (void)drawInMTKView:(nonnull MTKView*)view {
@@ -169,7 +170,7 @@
 
 - (void)splatParticles:(nonnull MTKView*)view commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
     MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
-    descriptor.colorAttachments[0].texture = textures[TextureHeapIndexParticleDensity];
+    descriptor.colorAttachments[0].texture = densityTexture;
     descriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
     descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
     descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
@@ -187,9 +188,8 @@
     id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
     [commandEncoder setComputePipelineState:rayMarchingState];
     [commandEncoder setTexture:drawable.texture atIndex:RayMarchingTextureIndexOutput];
-    if (TEXTURE_HEAP_SIZE > 0) {
-        [commandEncoder setTextures:textures withRange:NSMakeRange(RayMarchingTextureIndexHeap, TEXTURE_HEAP_SIZE)];
-    }
+    [commandEncoder setTexture:skyboxTexture atIndex:RayMarchingTextureIndexSkybox];
+    [commandEncoder setTexture:densityTexture atIndex:RayMarchingTextureIndexDensity];
     [commandEncoder setBuffer:cameraBuffer offset:0 atIndex:RayMarchingBufferIndexCamera];
     [commandEncoder setBytes:&edrHeadroom length:sizeof(float) atIndex:RayMarchingBufferIndexEDRHeadroom];
 

@@ -223,12 +223,13 @@ float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, acce
 }
 
 kernel void marchRays(texture2d<float, access::write> outputTexture [[texture(RayMarchingTextureIndexOutput)]],
-                      array<texture2d<float, access::sample>, TEXTURE_HEAP_SIZE> textures [[texture(RayMarchingTextureIndexHeap)]],
+                      texture2d<float, access::sample> skyboxTexture [[texture(RayMarchingTextureIndexSkybox)]],
+                      texture2d<float, access::sample> densityTexture [[texture(RayMarchingTextureIndexDensity)]],
                       constant Camera& camera [[buffer(RayMarchingBufferIndexCamera)]],
                       constant float& edrHeadroom [[buffer(RayMarchingBufferIndexEDRHeadroom)]],
                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) return;
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 color = getColor(camera, rayNormal, textures[TextureHeapIndexParticleDensity], textures[TextureHeapIndexSkybox], edrHeadroom);
+    float4 color = getColor(camera, rayNormal, densityTexture, skyboxTexture, edrHeadroom);
     outputTexture.write(color, gid);
 }

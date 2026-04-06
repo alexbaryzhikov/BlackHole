@@ -1,15 +1,9 @@
 #import "SharedTypes.h"
 
-#define TEXTURE_HEAP_SIZE 2
-
-typedef enum {
-    TextureHeapIndexSkybox,
-    TextureHeapIndexParticleDensity
-} TextureHeapIndex;
-
 typedef enum {
     RayMarchingTextureIndexOutput,
-    RayMarchingTextureIndexHeap,
+    RayMarchingTextureIndexSkybox,
+    RayMarchingTextureIndexDensity,
 } RayMarchingTextureIndex;
 
 typedef enum {

@@ -48,37 +48,7 @@ float3 getAcceleration(float3 p, float h2) {
     return -1.5 * EVENT_HORIZON * h2 / r5 * p;
 }
 
-inline float hash21(float2 p) {
-    return fract(sin(dot(p, float2(12.9898, 78.233))) * 43758.5453123);
-}
-
-inline float noise2D(float2 p) {
-    float2 i = floor(p);
-    float2 f = fract(p);
-
-    float a = hash21(i);
-    float b = hash21(i + float2(1.0, 0.0));
-    float c = hash21(i + float2(0.0, 1.0));
-    float d = hash21(i + float2(1.0, 1.0));
-
-    float2 u = f * f * (3.0 - 2.0 * f);
-
-    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
-}
-
-// Fractal Brownian Motion for turbulent plasma layers.
-inline float fbm(float2 p) {
-    float value = 0.0;
-    float amplitude = 0.5;
-    for (int i = 0; i < 4; i++) {
-        value += amplitude * noise2D(p);
-        p *= 2.0;
-        amplitude *= 0.5;
-    }
-    return value;
-}
-
-inline float4 sampleAccretionDisk(float2 position, texture2d<float, access::sample> densityMap) {
+float getPlasmaDensity(float2 position, texture2d<float, access::sample> densityMap) {
     constexpr sampler textureSampler(coord::normalized, address::clamp_to_zero, filter::linear);
     constexpr bool shearEnabled = true;
     constexpr float baseShear = 8.0;
@@ -105,23 +75,48 @@ inline float4 sampleAccretionDisk(float2 position, texture2d<float, access::samp
         density = densityMap.sample(textureSampler, sampleUV).r;
     }
     
-    return float4(float3(1.0) * density, density);
+    return density;
 }
 
-float4 getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal) {
+void getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal, thread float& beaming, thread float3& colorShift) {
+    constexpr float baseGasSpeed = 0.7;
+    
     float3 gasDirection = normalize(cross(float3(0.0, 0.0, 1.0), hitPosition));
-    float gasSpeed = sqrt(0.9 * EVENT_HORIZON / hitRadius);
+    float gasSpeed = sqrt(baseGasSpeed * EVENT_HORIZON / hitRadius);
     float3 gasVelocity = gasDirection * gasSpeed;
     float3 photonDirection = -rayNormal;
     float gamma = 1.0 / sqrt(1.0 - gasSpeed * gasSpeed);
     float dopplerFactor = 1.0 / (gamma * (1.0 - dot(gasVelocity, photonDirection)));
-    float beaming = dopplerFactor * dopplerFactor * dopplerFactor;
-    float3 colorShift = float3(
-        pow(dopplerFactor, -0.7),
-        pow(dopplerFactor, 0.1),
-        pow(dopplerFactor, 0.9)
-    );
-    return float4(colorShift * beaming, beaming);
+
+    beaming = dopplerFactor * dopplerFactor * dopplerFactor;
+    colorShift = float3(pow(dopplerFactor, -0.7),
+                        pow(dopplerFactor, 0.2),
+                        pow(dopplerFactor, 1.5));
+}
+
+float3 getPlasmaColor(float density) {
+    constexpr const float densityScale = 0.3;
+    
+    float3 darkPlasma = float3(2.0, 0.1, 0.0);
+    float3 midPlasma  = float3(12.0, 4.0, 0.2);
+    float3 hotPlasma  = float3(25.0, 18.0, 5.0);
+    
+    density *= densityScale;
+    float3 color = mix(darkPlasma, midPlasma, smoothstep(0.0, 0.4, density));
+    color = mix(color, hotPlasma, smoothstep(0.4, 0.8, density));
+    return color;
+}
+
+float4 getDiskColor(float3 hitPosition, float hitRadius, float3 rayNormal, texture2d<float, access::sample> densityMap) {
+    float plasmaDensity = getPlasmaDensity(hitPosition.xy, densityMap);
+    float dopplerBeaming = 1.0;
+    float3 dopplerColorShift = float3(1.0);
+    getDopplerShift(hitPosition, hitRadius, rayNormal, dopplerBeaming, dopplerColorShift);
+    plasmaDensity *= dopplerBeaming;
+    float3 plasmaColor = getPlasmaColor(plasmaDensity);
+    plasmaColor *= dopplerColorShift;
+    float alpha = min(plasmaDensity, 1.0);
+    return float4(plasmaColor * alpha, alpha);
 }
 
 void traceRay(float4 rayOrigin,
@@ -172,9 +167,7 @@ void traceRay(float4 rayOrigin,
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);
             if (hitRadius > DISK_INNER_RADIUS && hitRadius < DISK_OUTER_RADIUS) {
-                float4 diskColor = sampleAccretionDisk(hitPosition.xy, densityMap);
-                float4 dopplerShift = getDopplerShift(hitPosition, hitRadius, v);
-                diskColor *= dopplerShift;
+                float4 diskColor = getDiskColor(hitPosition, hitRadius, v, densityMap);
                 accumulatedColor.rgb += diskColor.rgb * (1.0 - accumulatedColor.a);
                 accumulatedColor.a += diskColor.a * (1.0 - accumulatedColor.a);
                 if (accumulatedColor.a >= 0.99) {

@@ -17,7 +17,7 @@ vertex SplatVertexOut splatVertex(device const GasParticle* particles [[buffer(0
     GasParticle p = particles[vid];
     SplatVertexOut out;
     out.position = float4(p.position.xy / densityMapRadius, 0.0, 1.0);
-    out.pointSize = p.mass * particleScale * ((1.0 - p.radius / DISK_OUTER_RADIUS) * 0.6 + 0.4);
+    out.pointSize = p.mass * particleScale * ((1.0 - p.radius / DISK_OUTER_RADIUS) * 0.8 + 0.2);
     out.intensity = p.mass * particleIntensity;
     return out;
 }

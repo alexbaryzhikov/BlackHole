@@ -9,8 +9,8 @@ struct SplatVertexOut {
 
 constexpr constant float densityMapRadius = DISK_OUTER_RADIUS * 1.02;
 
-vertex SplatVertexOut splatVertex(device const GasParticle* particles [[buffer(0)]],
-                                  uint vid [[vertex_id]]) {
+vertex SplatVertexOut splatParticlesVertex(device const GasParticle* particles [[buffer(0)]],
+                                           uint vid [[vertex_id]]) {
     constexpr float particleScale = 30.0;
     constexpr float particleIntensity = 0.5;
 
@@ -22,8 +22,8 @@ vertex SplatVertexOut splatVertex(device const GasParticle* particles [[buffer(0
     return out;
 }
 
-fragment float4 splatFragment(SplatVertexOut in [[stage_in]],
-                              float2 pointCoord [[point_coord]]){
+fragment float4 splatParticlesFragment(SplatVertexOut in [[stage_in]],
+                                       float2 pointCoord [[point_coord]]){
     constexpr float particleSoftness = 3.0;
 
     float2 worldCoord = (in.position.xy / DENSITY_MAP_RESOLUTION * 2.0 - 1.0) * densityMapRadius;

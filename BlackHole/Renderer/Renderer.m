@@ -56,8 +56,8 @@
 
     id<MTLLibrary> defaultLibrary = [device newDefaultLibrary];
     id<MTLFunction> updateParticlesFunction = [defaultLibrary newFunctionWithName:@"updateParticles"];
-    id<MTLFunction> splatVertexFunction = [defaultLibrary newFunctionWithName:@"splatVertex"];
-    id<MTLFunction> splatFragmentFunction = [defaultLibrary newFunctionWithName:@"splatFragment"];
+    id<MTLFunction> splatVertexFunction = [defaultLibrary newFunctionWithName:@"splatParticlesVertex"];
+    id<MTLFunction> splatFragmentFunction = [defaultLibrary newFunctionWithName:@"splatParticlesFragment"];
     id<MTLFunction> marchRaysFunction = [defaultLibrary newFunctionWithName:@"marchRays"];
 
     NSError* error = nil;

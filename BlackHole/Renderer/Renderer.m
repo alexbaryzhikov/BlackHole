@@ -1,4 +1,6 @@
 #import "Renderer.h"
+#import "BloomTypes.h"
+#import "CompositeTonemapTypes.h"
 #import "Config.h"
 #import "ModelBridge.h"
 #import "ParticleTypes.h"
@@ -12,6 +14,9 @@
     id<MTLComputePipelineState> updateParticlesState;
     id<MTLRenderPipelineState> splatParticlesState;
     id<MTLComputePipelineState> rayMarchingState;
+    id<MTLComputePipelineState> bloomDownsampleState;
+    id<MTLComputePipelineState> bloomUpsampleState;
+    id<MTLComputePipelineState> compositeTonemapState;
     id<MTLTexture> skyboxTexture;
     id<MTLTexture> densityTexture;
     id<MTLTexture> mainHDRTexture;
@@ -60,6 +65,9 @@
     id<MTLFunction> splatVertexFunction = [defaultLibrary newFunctionWithName:@"splatParticlesVertex"];
     id<MTLFunction> splatFragmentFunction = [defaultLibrary newFunctionWithName:@"splatParticlesFragment"];
     id<MTLFunction> marchRaysFunction = [defaultLibrary newFunctionWithName:@"marchRays"];
+    id<MTLFunction> bloomDownsampleFunction = [defaultLibrary newFunctionWithName:@"bloomDownsample"];
+    id<MTLFunction> bloomUpsampleFunction = [defaultLibrary newFunctionWithName:@"bloomUpsample"];
+    id<MTLFunction> compositeTonemapFunction = [defaultLibrary newFunctionWithName:@"compositeTonemap"];
 
     NSError* error = nil;
     updateParticlesState = [device newComputePipelineStateWithFunction:updateParticlesFunction error:&error];
@@ -84,6 +92,24 @@
     rayMarchingState = [device newComputePipelineStateWithFunction:marchRaysFunction error:&error];
     if (!rayMarchingState) {
         NSLog(@"Failed to create rayMarchingState: %@", error);
+    }
+
+    error = nil;
+    bloomDownsampleState = [device newComputePipelineStateWithFunction:bloomDownsampleFunction error:&error];
+    if (!bloomDownsampleState) {
+        NSLog(@"Failed to create bloomDownsampleState: %@", error);
+    }
+
+    error = nil;
+    bloomUpsampleState = [device newComputePipelineStateWithFunction:bloomUpsampleFunction error:&error];
+    if (!bloomUpsampleState) {
+        NSLog(@"Failed to create bloomUpsampleState: %@", error);
+    }
+
+    error = nil;
+    compositeTonemapState = [device newComputePipelineStateWithFunction:compositeTonemapFunction error:&error];
+    if (!compositeTonemapState) {
+        NSLog(@"Failed to create compositeTonemapState: %@", error);
     }
 }
 
@@ -122,9 +148,9 @@
 
 - (void)createBloomTextures {
     bloomTextures = [NSMutableArray array];
-    int width = MAIN_TEXTURE_WIDTH / 2;
-    int height = MAIN_TEXTURE_HEIGHT / 2;
-    for (NSUInteger i = 0; i < 6; ++i) {
+    int width = MAIN_TEXTURE_WIDTH;
+    int height = MAIN_TEXTURE_HEIGHT;
+    for (NSInteger i = 0; i < 8; ++i) {
         MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
                                                                                         width:width
                                                                                        height:height
@@ -144,9 +170,9 @@
 
 - (void)initializeParticles {
     const float densityFalloff = 1.5;
-    
+
     GasParticle* particles = (GasParticle*)particleBuffer.contents;
-    for (NSUInteger i = 0; i < PARTICLE_COUNT; ++i) {
+    for (NSInteger i = 0; i < PARTICLE_COUNT; ++i) {
         float t = MAX((float)arc4random() / UINT32_MAX, 0.000001f);
         float radius = DISK_INNER_RADIUS - logf(t) * densityFalloff;
         if (radius > DISK_OUTER_RADIUS) radius = DISK_INNER_RADIUS;
@@ -163,8 +189,11 @@
 
     [self updateUniforms:view];
     [self updateParticles:commandBuffer];
-    [self splatParticles:view commandBuffer:commandBuffer];
-    [self marchRays:view commandBuffer:commandBuffer];
+    [self splatParticles:commandBuffer];
+    [self marchRays:commandBuffer];
+    [self bloomDownsample:commandBuffer];
+    [self bloomUpsample:commandBuffer];
+    [self compositeTonemap:view commandBuffer:commandBuffer];
 
     [commandBuffer commit];
 }
@@ -195,47 +224,109 @@
     [commandEncoder setBuffer:particleBuffer offset:0 atIndex:ParticleSimulationBufferIndexParticles];
     [commandEncoder setBytes:&deltaTime length:sizeof(float) atIndex:ParticleSimulationBufferIndexDeltaTime];
 
+    MTLSize threadsPerGrid = MTLSizeMake(PARTICLE_COUNT, 1, 1);
     NSUInteger threadGroupSize = MIN(updateParticlesState.maxTotalThreadsPerThreadgroup, PARTICLE_COUNT);
     MTLSize threadsPerGroup = MTLSizeMake(threadGroupSize, 1, 1);
-    MTLSize threadsPerGrid = MTLSizeMake(PARTICLE_COUNT, 1, 1);
 
     [commandEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerGroup];
     [commandEncoder endEncoding];
 }
 
-- (void)splatParticles:(nonnull MTKView*)view commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
+- (void)splatParticles:(id<MTLCommandBuffer>)commandBuffer {
     MTLRenderPassDescriptor* descriptor = [MTLRenderPassDescriptor renderPassDescriptor];
     descriptor.colorAttachments[0].texture = densityTexture;
     descriptor.colorAttachments[0].loadAction = MTLLoadActionClear;
     descriptor.colorAttachments[0].clearColor = MTLClearColorMake(0.0, 0.0, 0.0, 0.0);
     descriptor.colorAttachments[0].storeAction = MTLStoreActionStore;
+
     id<MTLRenderCommandEncoder> commandEncoder = [commandBuffer renderCommandEncoderWithDescriptor:descriptor];
     [commandEncoder setRenderPipelineState:splatParticlesState];
     [commandEncoder setVertexBuffer:particleBuffer offset:0 atIndex:ParticleSplattingBufferIndexParticles];
+
     [commandEncoder drawPrimitives:MTLPrimitiveTypePoint vertexStart:0 vertexCount:PARTICLE_COUNT];
     [commandEncoder endEncoding];
 }
 
-- (void)marchRays:(nonnull MTKView*)view commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
-    id<CAMetalDrawable> drawable = view.currentDrawable;
-    if (!drawable) return;
-
+- (void)marchRays:(id<MTLCommandBuffer>)commandBuffer {
     id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
     [commandEncoder setComputePipelineState:rayMarchingState];
-    [commandEncoder setTexture:drawable.texture atIndex:RayMarchingTextureIndexOutput];
+    [commandEncoder setTexture:mainHDRTexture atIndex:RayMarchingTextureIndexOutput];
     [commandEncoder setTexture:skyboxTexture atIndex:RayMarchingTextureIndexSkybox];
     [commandEncoder setTexture:densityTexture atIndex:RayMarchingTextureIndexDensity];
     [commandEncoder setBuffer:cameraBuffer offset:0 atIndex:RayMarchingBufferIndexCamera];
-    [commandEncoder setBytes:&edrHeadroom length:sizeof(float) atIndex:RayMarchingBufferIndexEDRHeadroom];
 
-    NSUInteger width = rayMarchingState.threadExecutionWidth;
-    NSUInteger height = rayMarchingState.maxTotalThreadsPerThreadgroup / width;
-    MTLSize threadsPerGroup = MTLSizeMake(width, height, 1);
-    MTLSize threadsPerGrid = MTLSizeMake(drawable.texture.width, drawable.texture.height, 1);
+    MTLSize threadsPerGrid = MTLSizeMake(mainHDRTexture.width, mainHDRTexture.height, 1);
+    MTLSize threadsPerGroup = [self getThreadsPerGroup:rayMarchingState];
+
     [commandEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerGroup];
+    [commandEncoder endEncoding];
+}
+
+- (void)bloomDownsample:(id<MTLCommandBuffer>)commandBuffer {
+    id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
+    [commandEncoder setComputePipelineState:bloomDownsampleState];
+
+    id<MTLTexture> inputTexture = mainHDRTexture;
+    for (NSInteger i = 0; i < bloomTextures.count; ++i) {
+        id<MTLTexture> outputTexture = bloomTextures[i];
+
+        [commandEncoder setTexture:outputTexture atIndex:BloomTextureIndexOutput];
+        [commandEncoder setTexture:inputTexture atIndex:BloomTextureIndexInput];
+
+        MTLSize threadsPerGrid = MTLSizeMake(outputTexture.width, outputTexture.height, 1);
+        MTLSize threadsPerGroup = [self getThreadsPerGroup:bloomDownsampleState];
+
+        [commandEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerGroup];
+
+        inputTexture = outputTexture;
+    }
+
+    [commandEncoder endEncoding];
+}
+
+- (void)bloomUpsample:(id<MTLCommandBuffer>)commandBuffer {
+    id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
+    [commandEncoder setComputePipelineState:bloomUpsampleState];
+
+    for (NSInteger i = bloomTextures.count - 1; i > 0; --i) {
+        id<MTLTexture> inputTexture = bloomTextures[i];
+        id<MTLTexture> mipTexture = bloomTextures[i - 1];
+
+        [commandEncoder setTexture:mipTexture atIndex:BloomTextureIndexOutput];
+        [commandEncoder setTexture:inputTexture atIndex:BloomTextureIndexInput];
+        [commandEncoder setTexture:mipTexture atIndex:BloomTextureIndexMip];
+
+        MTLSize threadsPerGrid = MTLSizeMake(mipTexture.width, mipTexture.height, 1);
+        MTLSize threadsPerGroup = [self getThreadsPerGroup:bloomUpsampleState];
+
+        [commandEncoder dispatchThreads:threadsPerGrid threadsPerThreadgroup:threadsPerGroup];
+    }
+
+    [commandEncoder endEncoding];
+}
+
+- (void)compositeTonemap:(MTKView*)view commandBuffer:(id<MTLCommandBuffer>)commandBuffer {
+    id<CAMetalDrawable> drawable = view.currentDrawable;
+
+    id<MTLComputeCommandEncoder> commandEncoder = [commandBuffer computeCommandEncoder];
+    [commandEncoder setComputePipelineState:compositeTonemapState];
+    [commandEncoder setTexture:drawable.texture atIndex:CompositeTonemapTextureIndexOutput];
+    [commandEncoder setTexture:mainHDRTexture atIndex:CompositeTonemapTextureIndexHDR];
+    [commandEncoder setTexture:bloomTextures[0] atIndex:CompositeTonemapTextureIndexBloom];
+    [commandEncoder setBytes:&edrHeadroom length:sizeof(float) atIndex:CompositeTonemapBufferIndexEDRHeadroom];
+
+    MTLSize compositeGrid = MTLSizeMake(drawable.texture.width, drawable.texture.height, 1);
+    MTLSize compositeGroup = [self getThreadsPerGroup:compositeTonemapState];
+    [commandEncoder dispatchThreads:compositeGrid threadsPerThreadgroup:compositeGroup];
 
     [commandEncoder endEncoding];
     [commandBuffer presentDrawable:drawable];
+}
+
+- (MTLSize)getThreadsPerGroup:(id<MTLComputePipelineState>)state {
+    NSUInteger width = state.threadExecutionWidth;
+    NSUInteger height = state.maxTotalThreadsPerThreadgroup / width;
+    return MTLSizeMake(width, height, 1);
 }
 
 - (void)mtkView:(MTKView*)view drawableSizeWillChange:(CGSize)size {

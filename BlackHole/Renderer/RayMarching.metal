@@ -4,7 +4,6 @@
 #define EVENT_HORIZON   1.0f
 
 constant constexpr float2 anglesToUV = float2(1.0 / (M_PI_F * 2.0), M_1_PI_F);
-constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
 
 constant float3x3 sRGBToP3 = {
     {0.82246, 0.03319, 0.01708}, // Column 0 (Red mapping)
@@ -187,7 +186,7 @@ float2 getSkyboxCoord(float4 normal) {
     return uv;
 }
 
-float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal, float edrHeadroom) {
+float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNormal) {
     constexpr sampler textureSampler(coord::normalized, address::repeat, filter::linear);
     float2 readCoord = getSkyboxCoord(rayNormal);
     float4 outColor = skyboxTexture.sample(textureSampler, readCoord);
@@ -195,31 +194,19 @@ float4 sampleSkybox(texture2d<float, access::sample> skyboxTexture, float4 rayNo
     return outColor;
 }
 
-float3 applyEDRRollOff(float3 color, float edrHeadroom) {
-    float luma = dot(color, colorToLuma);
-    if (luma <= 1.0) {
-        return color;
-    }
-    float headroom = edrHeadroom - 1.0;
-    float excessLuma = luma - 1.0;
-    float compressedLuma = 1.0 + headroom * (1.0 - exp(-excessLuma/headroom));
-    return color * (compressedLuma / luma);
-}
-
-float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> densityMap, texture2d<float, access::sample> skybox, float edrHeadroom) {
+float4 getColor(constant Camera& camera, float4 rayNormal, texture2d<float, access::sample> densityMap, texture2d<float, access::sample> skybox) {
     float4 outRayNormal = float(0.0);
     float4 accumulatedColor = float(0.0);
     bool captured = false;
     traceRay(camera.position, rayNormal, densityMap, outRayNormal, accumulatedColor, captured);
     float4 outColor;
     if (!captured && accumulatedColor.a < 0.99) {
-        outColor = sampleSkybox(skybox, outRayNormal, edrHeadroom);
+        outColor = sampleSkybox(skybox, outRayNormal);
         outColor = float4(accumulatedColor.rgb + outColor.rgb * (1.0 - accumulatedColor.a), 1.0);
     } else {
         outColor = float4(accumulatedColor.rgb, 1.0);
     }
     outColor.rgb *= camera.exposure;
-    outColor.rgb = applyEDRRollOff(outColor.rgb, edrHeadroom);
     return outColor;
 }
 
@@ -227,10 +214,9 @@ kernel void marchRays(texture2d<float, access::write> outputTexture [[texture(Ra
                       texture2d<float, access::sample> skyboxTexture [[texture(RayMarchingTextureIndexSkybox)]],
                       texture2d<float, access::sample> densityTexture [[texture(RayMarchingTextureIndexDensity)]],
                       constant Camera& camera [[buffer(RayMarchingBufferIndexCamera)]],
-                      constant float& edrHeadroom [[buffer(RayMarchingBufferIndexEDRHeadroom)]],
                       uint2 gid [[thread_position_in_grid]]) {
     if (gid.x >= outputTexture.get_width() || gid.y >= outputTexture.get_height()) return;
     float4 rayNormal = getRayNormal(camera, {outputTexture.get_width(), outputTexture.get_height()}, gid);
-    float4 color = getColor(camera, rayNormal, densityTexture, skyboxTexture, edrHeadroom);
+    float4 color = getColor(camera, rayNormal, densityTexture, skyboxTexture);
     outputTexture.write(color, gid);
 }

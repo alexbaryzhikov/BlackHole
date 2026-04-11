@@ -3,6 +3,7 @@
 #define VIEWPORT_HEIGHT             900
 #define MAIN_TEXTURE_WIDTH          3200
 #define MAIN_TEXTURE_HEIGHT         1800
+#define HDR_ENABLED                 true
 
 // Camera
 #define CAMERA_HORIZONTAL_FOV       1.04719758f

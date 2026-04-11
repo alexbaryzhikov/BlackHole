@@ -50,11 +50,16 @@
 
 - (void)setupView:(nonnull MTKView*)view {
     view.framebufferOnly = NO;
-    view.colorPixelFormat = MTLPixelFormatRGBA16Float;
-    CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
-    view.colorspace = colorSpace;
-    CGColorSpaceRelease(colorSpace);
-    view.layer.preferredDynamicRange = CADynamicRangeHigh;
+    if (HDR_ENABLED) {
+        view.colorPixelFormat = MTLPixelFormatRGBA16Float;
+        CGColorSpaceRef colorSpace = CGColorSpaceCreateWithName(kCGColorSpaceExtendedLinearDisplayP3);
+        view.colorspace = colorSpace;
+        CGColorSpaceRelease(colorSpace);
+        view.layer.preferredDynamicRange = CADynamicRangeHigh;
+    } else {
+        view.colorPixelFormat = MTLPixelFormatBGRA8Unorm_sRGB;
+        view.colorspace = CGColorSpaceCreateDeviceRGB();
+    }
 }
 
 - (void)setupMetalPipeline:(nonnull MTKView*)view {

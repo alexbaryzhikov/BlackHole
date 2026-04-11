@@ -1,6 +1,8 @@
 // Display
 #define VIEWPORT_WIDTH              1600
 #define VIEWPORT_HEIGHT             900
+#define MAIN_TEXTURE_WIDTH          1600
+#define MAIN_TEXTURE_HEIGHT         900
 
 // Camera
 #define CAMERA_HORIZONTAL_FOV       1.04719758f

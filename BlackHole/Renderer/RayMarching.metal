@@ -1,10 +1,7 @@
 #import "../Config.h"
 #import "RayMarchingTypes.h"
 
-#define EVENT_HORIZON               1.0f
-#define ESCAPE_RADIUS               500.0f
-#define MAX_MARCHING_STEPS          1000
-#define DISK_VISIBLE                true
+#define EVENT_HORIZON   1.0f
 
 constant constexpr float2 anglesToUV = float2(1.0 / (M_PI_F * 2.0), M_1_PI_F);
 constant constexpr float3 colorToLuma = {0.2126, 0.7152, 0.0722};
@@ -95,7 +92,7 @@ void getDopplerShift(float3 hitPosition, float hitRadius, float3 rayNormal, thre
 }
 
 float3 getPlasmaColor(float density) {
-    constexpr const float densityScale = 0.3;
+    constexpr float densityScale = 0.3;
     
     float3 darkPlasma = float3(2.0, 0.1, 0.0);
     float3 midPlasma  = float3(12.0, 4.0, 0.2);
@@ -125,17 +122,21 @@ void traceRay(float4 rayOrigin,
               thread float4& outRayNormal,
               thread float4& accumulatedColor,
               thread bool& captured) {
+    constexpr int marchingSteps = 1000;
+    constexpr bool diskVisible = true;
+    constexpr float escapeRadius = 500.0f;
+
     float3 p = rayOrigin.xyz;
     float3 v = rayNormal.xyz;
     float3 angularMomentum = cross(p, v);
     float h2 = length_squared(angularMomentum);
-    for (int i = 0; i < MAX_MARCHING_STEPS; ++i) {
+    for (int i = 0; i < marchingSteps; ++i) {
         float r = length(p);
         if (r < EVENT_HORIZON) {
             captured = true;
             break;
         }
-        if (r > ESCAPE_RADIUS && dot(p, v) > 0.0) {
+        if (r > escapeRadius && dot(p, v) > 0.0) {
             break;
         }
         float dt = 0.05 * r;
@@ -162,7 +163,7 @@ void traceRay(float4 rayOrigin,
         v = normalize(v);
 
         // Accretion disk intersection.
-        if (DISK_VISIBLE && p0.z * p.z < 0.0) {
+        if (diskVisible && p0.z * p.z < 0.0) {
             float t = p0.z / (p0.z - p.z);
             float3 hitPosition = mix(p0, p, t);
             float hitRadius = length(hitPosition);

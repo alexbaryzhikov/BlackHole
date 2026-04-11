@@ -14,6 +14,8 @@
     id<MTLComputePipelineState> rayMarchingState;
     id<MTLTexture> skyboxTexture;
     id<MTLTexture> densityTexture;
+    id<MTLTexture> mainHDRTexture;
+    NSMutableArray<id<MTLTexture>>* bloomTextures;
     id<MTLBuffer> cameraBuffer;
     id<MTLBuffer> particleBuffer;
 
@@ -29,10 +31,9 @@
         device = view.device;
         [self setupView:view];
         [self setupMetalPipeline:view];
+        [self createTextures];
         [self createBuffers];
         [self initializeParticles];
-        [self loadSkybox];
-        [self setupParticleDensityTexture];
 
         edrHeadroom = 1.0;
         timeStart = CACurrentMediaTime();
@@ -86,6 +87,56 @@
     }
 }
 
+- (void)createTextures {
+    [self loadSkybox];
+    [self createParticleDensityTexture];
+    [self createMainHDRTexture];
+    [self createBloomTextures];
+}
+
+- (void)loadSkybox {
+    TextureLoader* loader = [[TextureLoader alloc] initWithDevice:device];
+    NSURL* url = [NSBundle.mainBundle URLForResource:@"nebula" withExtension:@"exr"];
+    skyboxTexture = [loader loadEXR:url];
+}
+
+- (void)createParticleDensityTexture {
+    MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float
+                                                                                    width:DENSITY_MAP_RESOLUTION
+                                                                                   height:DENSITY_MAP_RESOLUTION
+                                                                                mipmapped:NO];
+    desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;
+    densityTexture = [device newTextureWithDescriptor:desc];
+}
+
+- (void)createMainHDRTexture {
+    MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
+                                                                                    width:MAIN_TEXTURE_WIDTH
+                                                                                   height:MAIN_TEXTURE_HEIGHT
+                                                                                mipmapped:NO];
+    desc.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
+    desc.storageMode = MTLStorageModePrivate;
+    mainHDRTexture = [device newTextureWithDescriptor:desc];
+}
+
+- (void)createBloomTextures {
+    bloomTextures = [NSMutableArray array];
+    int width = MAIN_TEXTURE_WIDTH / 2;
+    int height = MAIN_TEXTURE_HEIGHT / 2;
+    for (NSUInteger i = 0; i < 6; ++i) {
+        MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatRGBA16Float
+                                                                                        width:width
+                                                                                       height:height
+                                                                                    mipmapped:NO];
+        desc.usage = MTLTextureUsageShaderWrite | MTLTextureUsageShaderRead;
+        desc.storageMode = MTLStorageModePrivate;
+        [bloomTextures addObject:[device newTextureWithDescriptor:desc]];
+        width = MAX(1, width / 2);
+        height = MAX(1, height / 2);
+    }
+}
+
 - (void)createBuffers {
     cameraBuffer = [device newBufferWithLength:sizeof(Camera) options:MTLResourceStorageModeShared];
     particleBuffer = [device newBufferWithLength:sizeof(GasParticle) * PARTICLE_COUNT options:MTLResourceStorageModeShared];
@@ -95,7 +146,7 @@
     const float densityFalloff = 1.5;
     
     GasParticle* particles = (GasParticle*)particleBuffer.contents;
-    for (NSUInteger i = 0; i < PARTICLE_COUNT; i++) {
+    for (NSUInteger i = 0; i < PARTICLE_COUNT; ++i) {
         float t = MAX((float)arc4random() / UINT32_MAX, 0.000001f);
         float radius = DISK_INNER_RADIUS - logf(t) * densityFalloff;
         if (radius > DISK_OUTER_RADIUS) radius = DISK_INNER_RADIUS;
@@ -105,22 +156,6 @@
         particles[i].position = simd_make_float2(cosf(angle) * radius, sinf(angle) * radius);
         particles[i].mass = ((float)arc4random() / UINT32_MAX) * 0.5f + 0.5f;
     }
-}
-
-- (void)loadSkybox {
-    TextureLoader* loader = [[TextureLoader alloc] initWithDevice:device];
-    NSURL* url = [NSBundle.mainBundle URLForResource:@"nebula" withExtension:@"exr"];
-    skyboxTexture = [loader loadEXR:url];
-}
-
-- (void)setupParticleDensityTexture {
-    MTLTextureDescriptor* desc = [MTLTextureDescriptor texture2DDescriptorWithPixelFormat:MTLPixelFormatR16Float
-                                                                                    width:DENSITY_MAP_RESOLUTION
-                                                                                   height:DENSITY_MAP_RESOLUTION
-                                                                                mipmapped:NO];
-    desc.usage = MTLTextureUsageRenderTarget | MTLTextureUsageShaderRead;
-    desc.storageMode = MTLStorageModePrivate;
-    densityTexture = [device newTextureWithDescriptor:desc];
 }
 
 - (void)drawInMTKView:(nonnull MTKView*)view {

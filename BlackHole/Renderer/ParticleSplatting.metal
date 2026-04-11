@@ -7,7 +7,7 @@ struct SplatVertexOut {
     float intensity;
 };
 
-constexpr constant float densityMapRadius = DISK_OUTER_RADIUS * 1.02;
+constant constexpr float densityMapRadius = DISK_OUTER_RADIUS * 1.02;
 
 vertex SplatVertexOut splatParticlesVertex(device const GasParticle* particles [[buffer(0)]],
                                            uint vid [[vertex_id]]) {
